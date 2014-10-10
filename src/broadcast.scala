@@ -66,9 +66,11 @@ class Node(ID: Int) extends Actor {
   def beb_broadcast(msg: DataMessage) {
     // TODO(cs): need to make explicit use of PerfectPointToPointLinks (see
     // Algorithm 3.1's dependency on Algorithm 2.2) rather than assuming
-    // reliable delivery.. Akka's `!` operator *does not* provide reliable delivery
+    // reliable delivery. Akka's `!` operator does *not* provide reliable delivery
     // according to:
     // http://doc.akka.io/docs/akka/snapshot/general/message-delivery-reliability.html
+    // For an Akka implementation of PerfectPointToPointLinks, see:
+    // http://doc.akka.io/docs/akka/snapshot/scala/persistence.html#at-least-once-delivery
     allActors.map(node => node ! BEB_Deliver(msg))
   }
 
