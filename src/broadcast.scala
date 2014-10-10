@@ -20,6 +20,20 @@ case class RB_Broadcast(msg: DataMessage)
 case class BEB_Broadcast(msg: DataMessage)
 case class BEB_Deliver(msg: DataMessage)
 
+class Link(destination: ActorRef) {
+  // TODO(cs): does Link need to be an Actor?
+  def send(msg: DataMessage) {
+    // TODO(cs): need to make explicit use of PerfectPointToPointLinks (see
+    // Algorithm 3.1's dependency on Algorithm 2.2) rather than assuming
+    // reliable delivery. Akka's `!` operator does *not* provide reliable delivery
+    // according to:
+    // http://doc.akka.io/docs/akka/snapshot/general/message-delivery-reliability.html
+    // For an Akka implementation of PerfectPointToPointLinks, see:
+    // http://doc.akka.io/docs/akka/snapshot/scala/persistence.html#at-least-once-delivery
+    destination ! BEB_Deliver(msg)
+  }
+}
+
 /**
  *
  * Local sending will just pass a reference to the
@@ -51,9 +65,10 @@ case class BEB_Deliver(msg: DataMessage)
  */
 class Node(ID: Int) extends Actor {
   type NodeSetT = Set[ActorRef]
+  type LinkSetT = Set[Link]
   type DeliveredT = Set[DataMessage]
 
-  var allActors: NodeSetT = Set()
+  var allLinks: LinkSetT = Set()
   var delivered: DeliveredT = Set()
 
 
@@ -64,16 +79,8 @@ class Node(ID: Int) extends Actor {
 
 
   def beb_broadcast(msg: DataMessage) {
-    // TODO(cs): need to make explicit use of PerfectPointToPointLinks (see
-    // Algorithm 3.1's dependency on Algorithm 2.2) rather than assuming
-    // reliable delivery. Akka's `!` operator does *not* provide reliable delivery
-    // according to:
-    // http://doc.akka.io/docs/akka/snapshot/general/message-delivery-reliability.html
-    // For an Akka implementation of PerfectPointToPointLinks, see:
-    // http://doc.akka.io/docs/akka/snapshot/scala/persistence.html#at-least-once-delivery
-    allActors.map(node => node ! BEB_Deliver(msg))
+    allLinks.map(link => link.send(msg))
   }
-
 
   def rb_deliver(msg: DataMessage) {
     println("Reliable broadcast delivery of message " + msg + " to " + ID)
@@ -94,13 +101,13 @@ class Node(ID: Int) extends Actor {
 
   def init(nodes: NodeSetT) {
     println("Initializing an actor with ID: " + ID);
-    allActors = nodes
+    allLinks = nodes.map(node => new Link(node))
   }
 
 
 
   def receive = {
-    case d: DeadLetter => allActors = allActors - d.recipient
+    //case d: DeadLetter => allActors = allActors - d.recipient
     case Init(nodes) => init(nodes)
     case Stop => context.stop(self)
     case RB_Broadcast(msg) => rb_bradcast(msg)
@@ -118,7 +125,7 @@ object Main extends App {
   val nodes = ids.map(i => startFun(i))
 
   nodes.map(node => node ! Init(nodes.toSet))
-  nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]) )
+  //nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]) )
 
   nodes(0) ! RB_Broadcast(DataMessage(1, "Message"))
   nodes(2) ! RB_Broadcast(DataMessage(2, "Message"))
