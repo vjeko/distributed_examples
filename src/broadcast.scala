@@ -1,6 +1,4 @@
-// TODO(cs): What's this deadletter stuff? Shouldn't we make that explicit rather than
-// using Akka's protocol?
-import akka.actor.{ Actor, ActorRef, DeadLetter }
+import akka.actor.{ Actor, ActorRef }
 import akka.actor.ActorSystem
 import akka.actor.Props
 
@@ -9,86 +7,80 @@ package object types {
   type DeliveredT = Set[DataMessage]
 }
 
-// Equivalent to "Die"
-case class Stop()
-case class Init(msg: Set[ActorRef])
-// Generic message type.
-case class DataMessage(seq: Int, data: String)
-// "Reliable broadcast" message type defined in Algorithm 3.2
-case class RB_Broadcast(msg: DataMessage)
-// "Best-effort broadcast" messages type defined in Algorithm 3.1
-case class BEB_Broadcast(msg: DataMessage)
-case class BEB_Deliver(msg: DataMessage)
+// -- Initialization messages --
+case class SetDestination(dst: ActorRef)
+case class AddLink(link: ActorRef)
 
-class Link(destination: ActorRef) {
-  // TODO(cs): does Link need to be an Actor?
-  def send(msg: DataMessage) {
-    // TODO(cs): need to make explicit use of PerfectPointToPointLinks (see
-    // Algorithm 3.1's dependency on Algorithm 2.2) rather than assuming
+// -- Base message type --
+case class DataMessage(seq: Int, data: String)
+
+// -- main() -> Node messages --
+case class Stop()
+case class TriggerRBBroadcast(msg: DataMessage)
+
+// -- Node -> Link messages --
+case class TriggerPLSend(msg: DataMessage)
+
+// -- Link -> Link messages --
+case class PLSend(msg: DataMessage)
+
+// -- Link -> Node messages ---
+case class PLDeliver(msg: DataMessage)
+
+/**
+ * PerfectLink Actor.
+ *
+ * N.B. A Node (source) and its Links must be co-located.
+ */
+class PerfectLink(source: ActorRef) extends Actor {
+  // N.B. destination is the destination Node's PerfectLink
+  var destination : ActorRef = null
+
+  def set_destination(dst: ActorRef) {
+    destination = dst
+  }
+
+  def pl_send(msg: DataMessage) {
+    // TODO(cs): need to implement PerfectPointToPointLinks rather than assuming
     // reliable delivery. Akka's `!` operator does *not* provide reliable delivery
     // according to:
     // http://doc.akka.io/docs/akka/snapshot/general/message-delivery-reliability.html
-    // For an Akka implementation of PerfectPointToPointLinks, see:
-    // http://doc.akka.io/docs/akka/snapshot/scala/persistence.html#at-least-once-delivery
-    destination ! BEB_Deliver(msg)
+    destination ! PLSend(msg)
   }
+
+  def receive = {
+    case SetDestination(dst) => set_destination(dst)
+    case TriggerPLSend(msg) => pl_send(msg)
+    case _ => println("Unknown message")
+  }
+
+  // TODO(cs): send PL_Deliver to source
 }
 
 /**
- *
- * Local sending will just pass a reference to the
- * message inside the same JVM, without any restrictions
- * on the underlying object which is sent, whereas a
- * remote transport will place a limit on the message size.
- *
- * Messages which cannot be delivered (and for which this
- * can be ascertained) will be delivered to a synthetic actor
- * called /deadLetters. This delivery happens on a best-effort
- * basis; it may fail even within the local JVM (e.g. during
- * actor termination). Messages sent via unreliable network
- * transports will be lost without turning up as dead letters.
- *
- * An actor can subscribe to class akka.actor.DeadLetter on
- * the event stream, see Event Stream (Java) or Event Stream
- * (Scala) for how to do that. The subscribed actor will then
- * receive all dead letters published in the (local) system
- * from that point onwards. Dead letters are not propagated
- * over the network, if you want to collect them in one place
- * you will have to subscribe one actor per network node and
- * forward them manually. Also consider that dead letters are
- * generated at that node which can determine that a send
- * operation is failed, which for a remote send can be the
- * local system (if no network connection can be established)
- * or the remote one (if the actor you are sending to does
- * not exist at that point in time).
- *
+ * Node Actor. Implements Reliable Broadcast.
  */
 class Node(ID: Int) extends Actor {
-  type NodeSetT = Set[ActorRef]
-  type LinkSetT = Set[Link]
+  type LinkSetT = Set[ActorRef]
   type DeliveredT = Set[DataMessage]
 
   var allLinks: LinkSetT = Set()
   var delivered: DeliveredT = Set()
 
-
-
-  def rb_bradcast(msg: DataMessage) {
+  def rb_broadcast(msg: DataMessage) {
     beb_broadcast(msg)
   }
 
-
   def beb_broadcast(msg: DataMessage) {
-    allLinks.map(link => link.send(msg))
+    allLinks.map(link => link ! TriggerPLSend(msg))
   }
 
   def rb_deliver(msg: DataMessage) {
     println("Reliable broadcast delivery of message " + msg + " to " + ID)
   }
 
-
   def beb_deliver(msg: DataMessage) {
-
+    // TODO(cs): this is actually RBDeliver, not beb_deliver
     if (delivered contains msg) {
       return
     }
@@ -98,40 +90,42 @@ class Node(ID: Int) extends Actor {
     beb_broadcast(msg)
   }
 
-
-  def init(nodes: NodeSetT) {
-    println("Initializing an actor with ID: " + ID);
-    allLinks = nodes.map(node => new Link(node))
+  def add_link(link: ActorRef) {
+    allLinks = allLinks + link
   }
 
-
-
   def receive = {
-    //case d: DeadLetter => allActors = allActors - d.recipient
-    case Init(nodes) => init(nodes)
+    case AddLink(link) => add_link(link)
     case Stop => context.stop(self)
-    case RB_Broadcast(msg) => rb_bradcast(msg)
-    case BEB_Deliver(msg) => beb_deliver(msg)
+    case TriggerRBBroadcast(msg) => rb_broadcast(msg)
+    case PLDeliver(msg) => beb_deliver(msg)
     case _ => println("Unknown message")
   }
 }
 
 object Main extends App {
-
   val system = ActorSystem("Broadcast")
 
   val ids = List.range(0, 5);
   val startFun = (i: Int) => system.actorOf(Props(new Node(i)))
   val nodes = ids.map(i => startFun(i))
 
-  nodes.map(node => node ! Init(nodes.toSet))
-  //nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]) )
+  val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
+    val l1 = system.actorOf(Props(new PerfectLink(src)))
+    val l2 = system.actorOf(Props(new PerfectLink(dst)))
+    l1 ! SetDestination(l2)
+    l2 ! SetDestination(l1)
+    src ! AddLink(l1)
+    dst ! AddLink(l2)
+  }
+  // N.B. nodes have links to themselves.
+  val pairs = for(x <- nodes; y <- nodes) yield (x, y)
+  pairs.map(tuple => createLinksForNodes(tuple._1, tuple._2))
 
-  nodes(0) ! RB_Broadcast(DataMessage(1, "Message"))
-  nodes(2) ! RB_Broadcast(DataMessage(2, "Message"))
+  nodes(0) ! TriggerRBBroadcast(DataMessage(1, "Message"))
+  nodes(2) ! TriggerRBBroadcast(DataMessage(2, "Message"))
   nodes(1) ! Stop
-  nodes(3) ! RB_Broadcast(DataMessage(3, "Message"))
-  nodes(2) ! RB_Broadcast(DataMessage(4, "Message"))
-  nodes(4) ! RB_Broadcast(DataMessage(5, "Message"))
-
+  nodes(3) ! TriggerRBBroadcast(DataMessage(3, "Message"))
+  nodes(2) ! TriggerRBBroadcast(DataMessage(4, "Message"))
+  nodes(4) ! TriggerRBBroadcast(DataMessage(5, "Message"))
 }
