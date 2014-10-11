@@ -7,7 +7,6 @@ import scala.concurrent.duration._
 case class AddLink(link: ActorRef)
 case class SetDestination(dst: ActorRef)
 case class SetParentID(id: Int)
-case class InitFailureDetector(links: Set[ActorRef])
 
 // -- Base message type --
 object DataMessage {
