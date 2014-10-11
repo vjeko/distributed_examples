@@ -51,6 +51,8 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
 
   // Repeatedly schedule Tick messages every PerfectLink.timeout_ms
   // milliseconds.
+  // TODO(cs): make this quiescent by adding ACKs and a failure detector
+  // interface.
   scheduler.schedule(PerfectLink.timeout_ms milliseconds,
                      PerfectLink.timeout_ms milliseconds,
                      self,
