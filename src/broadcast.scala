@@ -7,6 +7,7 @@ import scala.concurrent.duration._
 case class AddLink(link: ActorRef)
 case class SetDestination(dst: ActorRef)
 case class SetParentID(id: Int)
+case class InitFailureDetector(links: Set[ActorRef])
 
 // -- Base message type --
 object DataMessage {
@@ -34,6 +35,37 @@ case class Tick()
 // -- Link -> Node messages ---
 case class PLDeliver(src: Int, msg: DataMessage)
 
+// -- FailureDetector -> Link messages --
+case class SuspectedFailure(node: ActorRef)
+// N.B. even in a crash-stop failure model, SuspectedRecovery might still
+// occur in the case that the FD realized that it made a mistake.
+case class SuspectedRecovery(node: ActorRef)
+
+/**
+ * FailureDetector interface.
+ *
+ * Guarentee: eventually all suspects are correctly suspected. We don't know
+ * when that point will be though.
+ *
+ * We use an unorthodox "push" interface for notifying clients of suspected
+ * failures, rather than the traditional "pull" interface. This is to achieve
+ * quiescence.
+ */
+trait FailureDetector {}
+
+/**
+ * FailureDetector implementation meant to be integrated directly into a model checker or
+ * testing framework.
+ */
+class HackyFailureDetector(allLinks: Set[ActorRef]) extends Actor with FailureDetector {
+  def receive = {
+    case _ => println("Unknown message")
+  }
+
+  // TODO(cs): upon failing or recovering a node, send SuspectedFailure and
+  // SuspectedRecovery messages to all links.
+}
+
 // Class variable for PerfectLink.
 object PerfectLink {
   private val timeout_ms = 500
@@ -44,14 +76,15 @@ object PerfectLink {
  *
  * N.B. A Node (parent) and its PerfectLinks must be co-located.
  */
-// TODO(cs): make this quiescent by adding a failure detector
-// interface.
 class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
   // N.B. destination is the destination Node's PerfectLink
   var destination : ActorRef = null
   var parentID : Int = -1
   var delivered : Set[Int] = Set()
   var unacked : Map[Int,DataMessage] = Map()
+  // Whether the destination is suspected to be crashed, according to a
+  // FailureDetector.
+  var destination_suspected = false
 
   def set_destination(dst: ActorRef) {
     destination = dst
@@ -96,9 +129,25 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     unacked -= msg_id
   }
 
+  def handle_suspected_failure(suspect: ActorRef) {
+    // TODO(cs): does == work for ActorRefs?
+    if (suspect == destination) {
+      destination_suspected = true
+    }
+  }
+
+  def handle_suspected_recovery(suspect: ActorRef) {
+    if (suspect == destination) {
+      destination_suspected = false
+    }
+  }
+
   def handle_tick() {
     if (parentID == -1) {
       System.err.println("handle_tick(): parentID not yet set")
+      return
+    }
+    if (destination_suspected) {
       return
     }
     unacked.values.map(msg => sl_send(msg))
@@ -115,6 +164,8 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     case PLSend(msg) => pl_send(msg)
     case SLDeliver(src, msg) => handle_sl_deliver(src, msg)
     case ACK(msg_id) => handle_ack(msg_id)
+    case SuspectedFailure(destination) => handle_suspected_failure(destination)
+    case SuspectedRecovery(destination) => handle_suspected_recovery(destination)
     case Tick => handle_tick
     case _ => println("Unknown message")
   }
@@ -174,6 +225,7 @@ object Main extends App {
   val system = ActorSystem("Broadcast")
 
   val nodes = List.range(0, 5).map(_ => system.actorOf(Props(new Node())))
+  var links : Set[ActorRef] = Set()
 
   val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
     val l1 = system.actorOf(
@@ -188,10 +240,14 @@ object Main extends App {
     l2 ! SetDestination(l1)
     src ! AddLink(l1)
     dst ! AddLink(l2)
+    links = links + l1
+    links = links + l2
   }
   // N.B. nodes have links to themselves.
-  val src_dst_pairs = for(src <- nodes; dst <- nodes) yield (src, dst)
-  src_dst_pairs.map(tuple => createLinksForNodes(tuple._1, tuple._2))
+  val srcDstPairs = for(src <- nodes; dst <- nodes) yield (src, dst)
+  srcDstPairs.map(tuple => createLinksForNodes(tuple._1, tuple._2))
+
+  val fd = system.actorOf(Props(new HackyFailureDetector(links)))
 
   // TODO(cs): technically we should block here until all configuration
   // messages have been delivered. i.e. check that all Nodes have all their
