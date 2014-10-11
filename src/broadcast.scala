@@ -28,35 +28,30 @@ case class PLSend(msg: DataMessage)
 
 // -- Link -> Link messages --
 case class SLDeliver(src: Int, msg: DataMessage)
+case class ACK(msg_id: Int)
 case class Tick()
 
 // -- Link -> Node messages ---
 case class PLDeliver(src: Int, msg: DataMessage)
+
+// Class variable for PerfectLink.
+object PerfectLink {
+  private val timeout_ms = 500
+}
 
 /**
  * PerfectLink Actor.
  *
  * N.B. A Node (parent) and its PerfectLinks must be co-located.
  */
-object PerfectLink {
-  private val timeout_ms = 500
-}
-
+// TODO(cs): make this quiescent by adding a failure detector
+// interface.
 class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
   // N.B. destination is the destination Node's PerfectLink
   var destination : ActorRef = null
   var parentID : Int = -1
   var delivered : Set[Int] = Set()
-  var unacked : Set[DataMessage] = Set()
-
-  // Repeatedly schedule Tick messages every PerfectLink.timeout_ms
-  // milliseconds.
-  // TODO(cs): make this quiescent by adding ACKs and a failure detector
-  // interface.
-  scheduler.schedule(PerfectLink.timeout_ms milliseconds,
-                     PerfectLink.timeout_ms milliseconds,
-                     self,
-                     Tick)
+  var unacked : Map[Int,DataMessage] = Map()
 
   def set_destination(dst: ActorRef) {
     destination = dst
@@ -78,11 +73,17 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
       throw new RuntimeException("parentID not yet configured")
     }
     destination ! SLDeliver(parentID, msg)
-    // Set ensures uniqueness of unacked messages.
-    unacked = unacked + msg
+    if (unacked.size == 0) {
+      scheduler.scheduleOnce(PerfectLink.timeout_ms milliseconds,
+                             self,
+                             Tick)
+    }
+    unacked += (msg.id -> msg)
   }
 
   def handle_sl_deliver(senderID: Int, msg: DataMessage) {
+    destination ! ACK(msg.id)
+
     if (delivered contains msg.id) {
       return
     }
@@ -91,11 +92,20 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     parent ! PLDeliver(senderID, msg)
   }
 
+  def handle_ack(msg_id: Int) {
+    unacked -= msg_id
+  }
+
   def handle_tick() {
     if (parentID == -1) {
       System.err.println("handle_tick(): parentID not yet set")
-    } else {
-      unacked.map(msg => sl_send(msg))
+      return
+    }
+    unacked.values.map(msg => sl_send(msg))
+    if (unacked.size != 0) {
+      scheduler.scheduleOnce(PerfectLink.timeout_ms milliseconds,
+                             self,
+                             Tick)
     }
   }
 
@@ -104,6 +114,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     case SetParentID(id) => set_parent_id(id)
     case PLSend(msg) => pl_send(msg)
     case SLDeliver(src, msg) => handle_sl_deliver(src, msg)
+    case ACK(msg_id) => handle_ack(msg_id)
     case Tick => handle_tick
     case _ => println("Unknown message")
   }
