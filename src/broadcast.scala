@@ -157,6 +157,10 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     }
   }
 
+  def stop() {
+    context.stop(self)
+  }
+
   def receive = {
     case SetDestination(dst) => set_destination(dst)
     case SetParentID(id) => set_parent_id(id)
@@ -165,6 +169,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     case ACK(msg_id) => handle_ack(msg_id)
     case SuspectedFailure(destination) => handle_suspected_failure(destination)
     case SuspectedRecovery(destination) => handle_suspected_recovery(destination)
+    case Stop => stop
     case Tick => handle_tick
     case _ => println("Unknown message")
   }
@@ -211,9 +216,14 @@ class Node extends Actor {
     beb_broadcast(msg)
   }
 
+  def stop() {
+    allLinks.map(link => link ! Stop)
+    context.stop(self)
+  }
+
   def receive = {
     case AddLink(link) => add_link(link)
-    case Stop => context.stop(self)
+    case Stop => stop
     case RBBroadcast(msg) => rb_broadcast(msg)
     case PLDeliver(src, msg) => handle_pl_deliver(src, msg)
     case _ => println("Unknown message")
