@@ -39,11 +39,6 @@ case class SuspectedFailure(actor: ActorRef)
 // occur in the case that the FD realized that it made a mistake.
 case class SuspectedRecovery(actor: ActorRef)
 
-// -- main() -> FailureDetector message --
-case class Kill(node: ActorRef)
-case class Recover(node: ActorRef)
-case class GetLiveNodes()
-
 /**
  * FailureDetector interface.
  *
@@ -60,27 +55,15 @@ trait FailureDetector {}
  * FailureDetector implementation meant to be integrated directly into a model checker or
  * testing framework. Doubles as a mechanism for killing nodes.
  */
-// TODO(cs): make an object of main() rather than an Actor
-class HackyFailureDetector(nodes: List[ActorRef]) extends Actor with FailureDetector {
-  val log = Logging(context.system, this)
+class HackyFailureDetector(nodes: List[ActorRef]) extends FailureDetector {
   var liveNodes : Set[ActorRef] = Set() ++ nodes
 
   def kill(node: ActorRef) {
-    log.info("Killing " + node)
+    println ("Killing " + node)
     liveNodes = liveNodes - node
     node ! Stop
     val otherNodes = nodes.filter(n => n.compareTo(node) != 0)
     otherNodes.map(n => n ! SuspectedFailure(node))
-  }
-
-  def handle_get_live_nodes() {
-    sender() ! liveNodes
-  }
-
-  def receive = {
-    case Kill(node) => kill(node)
-    case GetLiveNodes => handle_get_live_nodes
-    case _ => log.error("Unknown message")
   }
 
   // TODO(cs): support recovery. Upon recovering a node, send SuspectedRecovery messages to all links.
@@ -276,7 +259,7 @@ object Main extends App {
   val srcDstPairs  = for (i <- 0 to numNodes-1; j <- i+1 to numNodes-1) yield (nodes(i), nodes(j))
   srcDstPairs.map(tuple => createLinksForNodes(tuple._1, tuple._2))
 
-  val fd = system.actorOf(Props(classOf[HackyFailureDetector],nodes), name="fd")
+  val fd = new HackyFailureDetector(nodes)
 
   // TODO(cs): technically we should block here until all configuration
   // messages have been delivered. i.e. check that all Nodes have all their
@@ -285,14 +268,12 @@ object Main extends App {
   // Sample Execution:
 
   nodes(0) ! RBBroadcast(DataMessage("Message"))
-  fd ! Kill(nodes(1))
+  fd.kill(nodes(1))
   nodes(numNodes-1) ! RBBroadcast(DataMessage("Message"))
   nodes(0) ! RBBroadcast(DataMessage("Message"))
 
   implicit val timeout = Timeout(2 seconds)
-  val liveNodes = Await.result(fd.ask(GetLiveNodes), 500 milliseconds).
-                        asInstanceOf[Set[ActorRef]]
-  while (liveNodes.map(
+  while (fd.liveNodes.map(
          n => Await.result(n.ask(StillActiveQuery), 500 milliseconds).
               asInstanceOf[Boolean]).reduceLeft(_ | _)) {
     Thread sleep 500
