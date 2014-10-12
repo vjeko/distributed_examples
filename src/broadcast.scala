@@ -6,8 +6,6 @@ import scala.concurrent.duration._
 
 // -- Initialization messages --
 case class AddLink(link: ActorRef)
-case class SetDestination(dst: ActorRef)
-case class SetParentID(id: Int)
 
 // -- Base message type --
 object DataMessage {
@@ -24,18 +22,14 @@ case class DataMessage(data: String) {
 case class Stop()
 case class RBBroadcast(msg: DataMessage)
 
-// -- Node -> Link messages --
-case class PLSend(msg: DataMessage)
-
 // -- Link -> Link messages --
-case class SLDeliver(src: Int, msg: DataMessage)
-case class ACK(msg_id: Int)
+case class SLDeliver(senderName: String, msg: DataMessage)
+case class ACK(senderName: String, msgID: Int)
+
+// -- Node -> Node messages --
 case class Tick()
 
-// -- Link -> Node messages ---
-case class PLDeliver(src: Int, msg: DataMessage)
-
-// -- FailureDetector -> Link messages --
+// -- FailureDetector -> Node messages --
 case class SuspectedFailure(actor: ActorRef)
 // N.B. even in a crash-stop failure model, SuspectedRecovery might still
 // occur in the case that the FD realized that it made a mistake.
@@ -43,6 +37,7 @@ case class SuspectedRecovery(actor: ActorRef)
 
 // -- main() -> FailureDetector message --
 case class Kill(node: ActorRef)
+case class Recover(node: ActorRef)
 
 /**
  * FailureDetector interface.
@@ -60,17 +55,14 @@ trait FailureDetector {}
  * FailureDetector implementation meant to be integrated directly into a model checker or
  * testing framework. Doubles as a mechanism for killing nodes.
  */
-class HackyFailureDetector(node2links: Map[ActorRef,Set[ActorRef]]) extends Actor with FailureDetector {
-  var allLinks = node2links.values.flatten
+class HackyFailureDetector(nodes: List[ActorRef]) extends Actor with FailureDetector {
   val log = Logging(context.system, this)
 
   def kill(node: ActorRef) {
     log.info("Killing " + node)
     node ! Stop
-    var deadLinks = node2links.getOrElse(node, null)
-    allLinks.filter(link => (!(deadLinks contains link))).map(link =>
-      deadLinks.map(dead => link ! SuspectedFailure(dead))
-    )
+    val otherNodes = nodes.filter(n => n.compareTo(node) != 0)
+    otherNodes.map(n => n ! SuspectedFailure(node))
   }
 
   def receive = {
@@ -83,69 +75,47 @@ class HackyFailureDetector(node2links: Map[ActorRef,Set[ActorRef]]) extends Acto
 
 // Class variable for PerfectLink.
 object PerfectLink {
-  private val timeout_ms = 500
+  private val timeoutMillis = 500
 }
 
 /**
- * PerfectLink Actor.
- *
- * N.B. A Node (parent) and its PerfectLinks must be co-located.
+ * PerfectLink. Attached to Nodes.
  */
-class PerfectLink(parent: ActorRef) extends Actor {
-  // N.B. destination is the destination Node's PerfectLink
-  var destination : ActorRef = null
-  var parentID : Int = -1
+class PerfectLink(parent: Node, destination: ActorRef, name: String) {
+  var parentName = parent.name
   var delivered : Set[Int] = Set()
   var unacked : Map[Int,DataMessage] = Map()
   // Whether the destination is suspected to be crashed, according to a
   // FailureDetector.
   var destinationSuspected = false
-  val log = Logging(context.system, this)
-
-  def set_destination(dst: ActorRef) {
-    destination = dst
-  }
-
-  def set_parent_id(id: Int) {
-    parentID = id
-  }
 
   def pl_send(msg: DataMessage) {
     sl_send(msg)
   }
 
   def sl_send(msg: DataMessage) {
-    if (destination == null) {
-      throw new RuntimeException("destination not yet configured")
-    }
-    if (parentID == -1) {
-      throw new RuntimeException("parentID not yet configured")
-    }
-    log.info("Sending SLDeliver(" + parentID + "," + msg + ")")
-    destination ! SLDeliver(parentID, msg)
+    parent.log.info("Sending SLDeliver(" + parentName + "," + msg + ")")
+    destination ! SLDeliver(parentName, msg)
     if (unacked.size == 0) {
-      context.system.scheduler.scheduleOnce(
-        PerfectLink.timeout_ms milliseconds,
-        self,
-        Tick)
+      parent.schedule_timer(PerfectLink.timeoutMillis)
     }
     unacked += (msg.id -> msg)
   }
 
-  def handle_sl_deliver(senderID: Int, msg: DataMessage) {
-    log.info("Sending ACK(" + msg.id + ")")
-    destination ! ACK(msg.id)
+  def handle_sl_deliver(senderName: String, msg: DataMessage) {
+    parent.log.info("Sending ACK(" + parentName + "," + msg.id + ")")
+    destination ! ACK(parentName, msg.id)
 
     if (delivered contains msg.id) {
       return
     }
 
     delivered = delivered + msg.id
-    parent ! PLDeliver(senderID, msg)
+    parent.handle_pl_deliver(senderName, msg)
   }
 
-  def handle_ack(msg_id: Int) {
-    unacked -= msg_id
+  def handle_ack(senderName: String, msgID: Int) {
+    unacked -= msgID
   }
 
   def handle_suspected_failure(suspect: ActorRef) {
@@ -161,58 +131,53 @@ class PerfectLink(parent: ActorRef) extends Actor {
   }
 
   def handle_tick() {
-    if (parentID == -1) {
-      log.error("handle_tick(): parentID not yet set")
-      return
-    }
     if (destinationSuspected) {
       return
     }
     unacked.values.map(msg => sl_send(msg))
     if (unacked.size != 0) {
-      context.system.scheduler.scheduleOnce(
-        PerfectLink.timeout_ms milliseconds,
-        self,
-        Tick)
+      parent.schedule_timer(PerfectLink.timeoutMillis)
     }
   }
+}
 
-  def stop() {
-    context.stop(self)
+/**
+ * TimerQueue schedules timer events.
+ */
+class TimerQueue(scheduler: Scheduler, source: ActorRef) {
+  var timerPending = false
+
+  def maybe_schedule(timerMillis: Int) {
+    if (timerPending) {
+      return
+    }
+    timerPending = true
+    scheduler.scheduleOnce(
+      timerMillis milliseconds,
+      source,
+      Tick)
   }
 
-  def receive = {
-    case SetDestination(dst) => set_destination(dst)
-    case SetParentID(id) => set_parent_id(id)
-    case PLSend(msg) => pl_send(msg)
-    case SLDeliver(src, msg) => handle_sl_deliver(src, msg)
-    case ACK(msg_id) => handle_ack(msg_id)
-    case SuspectedFailure(destination) => handle_suspected_failure(destination)
-    case SuspectedRecovery(destination) => handle_suspected_recovery(destination)
-    case Stop => stop
-    case Tick => handle_tick
-    case _ => log.error("Unknown message")
+  def handle_tick() {
+    timerPending = false
   }
 }
 
 /**
  * Node Actor. Implements Reliable Broadcast.
  */
-object Node {
-  // Global static variable to simplify creation of unique IDs.
-  private var next_id = -1
-  private def get_next_id = {next_id += 1; next_id}
-}
-
-class Node extends Actor {
-  var id = Node.get_next_id
-  var allLinks: Set[ActorRef] = Set()
+class Node(id: Int) extends Actor {
+  var name = self.path.name
+  val timerQueue = new TimerQueue(context.system.scheduler, self)
+  var allLinks: Set[PerfectLink] = Set()
+  var dst2link: Map[String, PerfectLink] = Map()
   var delivered: Set[Int] = Set()
   val log = Logging(context.system, this)
 
-  def add_link(link: ActorRef) {
+  def add_link(dst: ActorRef) {
+    val link = new PerfectLink(this, dst, name + "-" + dst.path.name)
     allLinks = allLinks + link
-    link ! SetParentID(id)
+    dst2link += (dst.path.name -> link)
   }
 
   def rb_broadcast(msg: DataMessage) {
@@ -221,33 +186,56 @@ class Node extends Actor {
   }
 
   def beb_broadcast(msg: DataMessage) {
-    allLinks.map(link => link ! PLSend(msg))
+    allLinks.map(link => link.pl_send(msg))
   }
 
-  def handle_pl_deliver(src: Int, msg: DataMessage) {
-    handle_beb_deliver(src, msg)
+  def handle_pl_deliver(senderName: String, msg: DataMessage) {
+    handle_beb_deliver(senderName, msg)
   }
 
-  def handle_beb_deliver(src: Int, msg: DataMessage) {
+  def handle_beb_deliver(senderName: String, msg: DataMessage) {
     if (delivered contains msg.id) {
       return
     }
 
     delivered = delivered + msg.id
-    log.info("RBDeliver of message " + msg + " from " + src + " to " + id)
+    log.info("RBDeliver of message " + msg + " from " + senderName + " to " + name)
     beb_broadcast(msg)
   }
 
   def stop() {
-    allLinks.map(link => link ! Stop)
     context.stop(self)
   }
 
+  def handle_tick() {
+    timerQueue.handle_tick
+    allLinks.map(link => link.handle_tick)
+  }
+
+  def schedule_timer(timerMillis: Int) {
+    timerQueue.maybe_schedule(timerMillis)
+  }
+
+  def handle_suspected_failure(destination: ActorRef) {
+    allLinks.map(link => link.handle_suspected_failure(destination))
+  }
+
+  def handle_suspected_recovery(destination: ActorRef) {
+    allLinks.map(link => link.handle_suspected_recovery(destination))
+  }
+
   def receive = {
-    case AddLink(link) => add_link(link)
+    // Node messages:
+    case AddLink(dst) => add_link(dst)
     case Stop => stop
     case RBBroadcast(msg) => rb_broadcast(msg)
-    case PLDeliver(src, msg) => handle_pl_deliver(src, msg)
+    // Link messages:
+    case SLDeliver(senderName, msg) => dst2link.getOrElse(senderName, null).handle_sl_deliver(senderName, msg)
+    case ACK(senderName, msgID) => dst2link.getOrElse(senderName, null).handle_ack(senderName, msgID)
+    // FailureDetector messages:
+    case SuspectedFailure(destination) => handle_suspected_failure(destination)
+    case SuspectedRecovery(destination) => handle_suspected_recovery(destination)
+    case Tick => handle_tick
     case _ => log.error("Unknown message")
   }
 }
@@ -258,39 +246,16 @@ object Main extends App {
   val numNodes = 4
   println ("numNodes: " + numNodes)
   val nodes = List.range(0, numNodes).map(i =>
-    system.actorOf(Props[Node], name="node" + i))
-  var links : Set[ActorRef] = Set()
-  var node2links : Map[ActorRef,Set[ActorRef]] = Map()
+    system.actorOf(Props(classOf[Node], i), name="node" + i))
 
   val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
-    val l1 = system.actorOf(
-      Props(classOf[PerfectLink], src),
-      name=src.path.name + "-" + dst.path.name)
-    val l2 = system.actorOf(
-      Props(classOf[PerfectLink], dst),
-      name=dst.path.name + "-" + src.path.name)
-    // Can't pass the destination in the ctor because of a circular dependency.
-    // Annoying that we have to asynchronously configure these objects...
-    // we're not guarenteed that they'll be in a valid state!
-    // There's probably a better way to do this.
-    l1 ! SetDestination(l2)
-    l2 ! SetDestination(l1)
-    src ! AddLink(l1)
-    dst ! AddLink(l2)
-    links = links + l1
-    links = links + l2
-    List(src,dst).map(node =>
-      if (!(node2links contains node)) {
-        node2links += (node -> Set())
-      }
-    )
-    node2links += (src -> (node2links.getOrElse(src, Set()) + l1))
-    node2links += (dst -> (node2links.getOrElse(dst, Set()) + l2))
+    src ! AddLink(dst)
+    dst ! AddLink(src)
   }
   val srcDstPairs  = for (i <- 0 to numNodes-1; j <- i+1 to numNodes-1) yield (nodes(i), nodes(j))
   srcDstPairs.map(tuple => createLinksForNodes(tuple._1, tuple._2))
 
-  val fd = system.actorOf(Props(classOf[HackyFailureDetector],node2links), name="fd")
+  val fd = system.actorOf(Props(classOf[HackyFailureDetector],nodes), name="fd")
 
   // TODO(cs): technically we should block here until all configuration
   // messages have been delivered. i.e. check that all Nodes have all their
