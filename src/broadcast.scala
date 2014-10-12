@@ -35,10 +35,13 @@ case class Tick()
 case class PLDeliver(src: Int, msg: DataMessage)
 
 // -- FailureDetector -> Link messages --
-case class SuspectedFailure(node: ActorRef)
+case class SuspectedFailure(actor: ActorRef)
 // N.B. even in a crash-stop failure model, SuspectedRecovery might still
 // occur in the case that the FD realized that it made a mistake.
-case class SuspectedRecovery(node: ActorRef)
+case class SuspectedRecovery(actor: ActorRef)
+
+// -- main() -> FailureDetector message --
+case class Kill(node: ActorRef)
 
 /**
  * FailureDetector interface.
@@ -54,15 +57,25 @@ trait FailureDetector {}
 
 /**
  * FailureDetector implementation meant to be integrated directly into a model checker or
- * testing framework.
+ * testing framework. Doubles as a mechanism for killing nodes.
  */
-class HackyFailureDetector(allLinks: Set[ActorRef]) extends Actor with FailureDetector {
+class HackyFailureDetector(node2links: Map[ActorRef,Set[ActorRef]]) extends Actor with FailureDetector {
+  var allLinks = node2links.values.flatten
+
+  def kill(node: ActorRef) {
+    node ! Stop
+    var deadLinks = node2links.getOrElse(node, null)
+    allLinks.filter(link => (!(deadLinks contains link))).map(link =>
+      deadLinks.map(dead => link ! SuspectedFailure(dead))
+    )
+  }
+
   def receive = {
+    case Kill(node) => kill(node)
     case _ => println("Unknown message")
   }
 
-  // TODO(cs): upon failing or recovering a node, send SuspectedFailure and
-  // SuspectedRecovery messages to all links.
+  // TODO(cs): support recovery. Upon recovering a node, send SuspectedRecovery messages to all links.
 }
 
 // Class variable for PerfectLink.
@@ -235,6 +248,7 @@ object Main extends App {
 
   val nodes = List.range(0, 5).map(_ => system.actorOf(Props(new Node())))
   var links : Set[ActorRef] = Set()
+  var node2links : Map[ActorRef,Set[ActorRef]] = Map()
 
   val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
     val l1 = system.actorOf(
@@ -251,12 +265,19 @@ object Main extends App {
     dst ! AddLink(l2)
     links = links + l1
     links = links + l2
+    List(src,dst).map(node =>
+      if (!(node2links contains node)) {
+        node2links += (node -> Set())
+      }
+    )
+    node2links += (src -> (node2links.getOrElse(src, Set()) + l1))
+    node2links += (dst -> (node2links.getOrElse(dst, Set()) + l2))
   }
   // N.B. nodes have links to themselves.
   val srcDstPairs = for(src <- nodes; dst <- nodes) yield (src, dst)
   srcDstPairs.map(tuple => createLinksForNodes(tuple._1, tuple._2))
 
-  val fd = system.actorOf(Props(new HackyFailureDetector(links)))
+  val fd = system.actorOf(Props(new HackyFailureDetector(node2links)))
 
   // TODO(cs): technically we should block here until all configuration
   // messages have been delivered. i.e. check that all Nodes have all their
@@ -265,7 +286,7 @@ object Main extends App {
   // Sample Execution:
   nodes(0) ! RBBroadcast(DataMessage("Message"))
   nodes(2) ! RBBroadcast(DataMessage("Message"))
-  nodes(1) ! Stop
+  fd ! Kill(nodes(1))
   nodes(3) ! RBBroadcast(DataMessage("Message"))
   nodes(2) ! RBBroadcast(DataMessage("Message"))
   nodes(4) ! RBBroadcast(DataMessage("Message"))
