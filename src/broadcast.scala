@@ -99,7 +99,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
   var unacked : Map[Int,DataMessage] = Map()
   // Whether the destination is suspected to be crashed, according to a
   // FailureDetector.
-  var destination_suspected = false
+  var destinationSuspected = false
   val log = Logging(context.system, this)
 
   def set_destination(dst: ActorRef) {
@@ -150,13 +150,13 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
   def handle_suspected_failure(suspect: ActorRef) {
     // TODO(cs): does == work for ActorRefs?
     if (suspect == destination) {
-      destination_suspected = true
+      destinationSuspected = true
     }
   }
 
   def handle_suspected_recovery(suspect: ActorRef) {
     if (suspect == destination) {
-      destination_suspected = false
+      destinationSsuspected = false
     }
   }
 
@@ -165,7 +165,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
       log.error("handle_tick(): parentID not yet set")
       return
     }
-    if (destination_suspected) {
+    if (destinationSuspected) {
       return
     }
     unacked.values.map(msg => sl_send(msg))
@@ -254,7 +254,8 @@ class Node extends Actor {
 object Main extends App {
   val system = ActorSystem("Broadcast")
 
-  val nodes = List.range(0, 5).map(_ => system.actorOf(Props(new Node())))
+  val numNodes = 3
+  val nodes = List.range(0, numNodes).map(_ => system.actorOf(Props(new Node())))
   var links : Set[ActorRef] = Set()
   var node2links : Map[ActorRef,Set[ActorRef]] = Map()
 
@@ -292,12 +293,11 @@ object Main extends App {
   // Links.
 
   // Sample Execution:
+
   nodes(0) ! RBBroadcast(DataMessage("Message"))
-  nodes(2) ! RBBroadcast(DataMessage("Message"))
   fd ! Kill(nodes(1))
-  nodes(3) ! RBBroadcast(DataMessage("Message"))
-  nodes(2) ! RBBroadcast(DataMessage("Message"))
-  nodes(4) ! RBBroadcast(DataMessage("Message"))
+  nodes(numNodes-1) ! RBBroadcast(DataMessage("Message"))
+  nodes(0) ! RBBroadcast(DataMessage("Message"))
 
   // TODO(cs): need to figure out how to detect when the test is over.
   // Otherwise, Akka just sits in an infinite loop.
