@@ -1,5 +1,6 @@
 import akka.actor.{ Actor, ActorRef }
 import akka.actor.{ ActorSystem, Scheduler, Props }
+import akka.event.Logging
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 
@@ -61,8 +62,10 @@ trait FailureDetector {}
  */
 class HackyFailureDetector(node2links: Map[ActorRef,Set[ActorRef]]) extends Actor with FailureDetector {
   var allLinks = node2links.values.flatten
+  val log = Logging(context.system, this)
 
   def kill(node: ActorRef) {
+    log.info("Killing " + node)
     node ! Stop
     var deadLinks = node2links.getOrElse(node, null)
     allLinks.filter(link => (!(deadLinks contains link))).map(link =>
@@ -72,7 +75,7 @@ class HackyFailureDetector(node2links: Map[ActorRef,Set[ActorRef]]) extends Acto
 
   def receive = {
     case Kill(node) => kill(node)
-    case _ => println("Unknown message")
+    case _ => log.error("Unknown message")
   }
 
   // TODO(cs): support recovery. Upon recovering a node, send SuspectedRecovery messages to all links.
@@ -97,6 +100,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
   // Whether the destination is suspected to be crashed, according to a
   // FailureDetector.
   var destination_suspected = false
+  val log = Logging(context.system, this)
 
   def set_destination(dst: ActorRef) {
     destination = dst
@@ -117,6 +121,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     if (parentID == -1) {
       throw new RuntimeException("parentID not yet configured")
     }
+    log.info("Sending SLDeliver(" + parentID + "," + msg + ")")
     destination ! SLDeliver(parentID, msg)
     if (unacked.size == 0) {
       scheduler.scheduleOnce(PerfectLink.timeout_ms milliseconds,
@@ -127,6 +132,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
   }
 
   def handle_sl_deliver(senderID: Int, msg: DataMessage) {
+    log.info("Sending ACK(" + msg.id + ")")
     destination ! ACK(msg.id)
 
     if (delivered contains msg.id) {
@@ -156,7 +162,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
 
   def handle_tick() {
     if (parentID == -1) {
-      System.err.println("handle_tick(): parentID not yet set")
+      log.error("handle_tick(): parentID not yet set")
       return
     }
     if (destination_suspected) {
@@ -184,7 +190,7 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     case SuspectedRecovery(destination) => handle_suspected_recovery(destination)
     case Stop => stop
     case Tick => handle_tick
-    case _ => println("Unknown message")
+    case _ => log.error("Unknown message")
   }
 }
 
@@ -201,6 +207,7 @@ class Node extends Actor {
   var id = Node.get_next_id
   var allLinks: Set[ActorRef] = Set()
   var delivered: Set[Int] = Set()
+  val log = Logging(context.system, this)
 
   def add_link(link: ActorRef) {
     allLinks = allLinks + link
@@ -208,6 +215,7 @@ class Node extends Actor {
   }
 
   def rb_broadcast(msg: DataMessage) {
+    log.info("Initiating RBBroadcast(" + msg + ")")
     beb_broadcast(msg)
   }
 
@@ -225,7 +233,7 @@ class Node extends Actor {
     }
 
     delivered = delivered + msg.id
-    println("RBDeliver of message " + msg + " from " + src + " to " + id)
+    log.info("RBDeliver of message " + msg + " from " + src + " to " + id)
     beb_broadcast(msg)
   }
 
@@ -239,7 +247,7 @@ class Node extends Actor {
     case Stop => stop
     case RBBroadcast(msg) => rb_broadcast(msg)
     case PLDeliver(src, msg) => handle_pl_deliver(src, msg)
-    case _ => println("Unknown message")
+    case _ => log.error("Unknown message")
   }
 }
 
