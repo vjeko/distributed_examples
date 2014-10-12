@@ -255,7 +255,8 @@ class Node extends Actor {
 object Main extends App {
   val system = ActorSystem("Broadcast")
 
-  val numNodes = 3
+  val numNodes = 4
+  println ("numNodes: " + numNodes)
   val nodes = List.range(0, numNodes).map(i =>
     system.actorOf(Props[Node], name="node" + i))
   var links : Set[ActorRef] = Set()
