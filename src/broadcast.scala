@@ -200,7 +200,7 @@ class PerfectLink(parent: ActorRef) extends Actor {
  */
 object Node {
   // Global static variable to simplify creation of unique IDs.
-  private var next_id = 0
+  private var next_id = -1
   private def get_next_id = {next_id += 1; next_id}
 }
 
