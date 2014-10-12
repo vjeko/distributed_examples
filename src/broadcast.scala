@@ -1,6 +1,9 @@
 import akka.actor.{ Actor, ActorRef }
 import akka.actor.{ ActorSystem, Scheduler, Props }
+import akka.pattern.ask
 import akka.event.Logging
+import akka.util.Timeout
+import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 
@@ -20,6 +23,7 @@ case class DataMessage(data: String) {
 
 // -- main() -> Node messages --
 case class Stop()
+case class StillActiveQuery()
 case class RBBroadcast(msg: DataMessage)
 
 // -- Link -> Link messages --
@@ -38,6 +42,7 @@ case class SuspectedRecovery(actor: ActorRef)
 // -- main() -> FailureDetector message --
 case class Kill(node: ActorRef)
 case class Recover(node: ActorRef)
+case class GetLiveNodes()
 
 /**
  * FailureDetector interface.
@@ -55,18 +60,26 @@ trait FailureDetector {}
  * FailureDetector implementation meant to be integrated directly into a model checker or
  * testing framework. Doubles as a mechanism for killing nodes.
  */
+// TODO(cs): make an object of main() rather than an Actor
 class HackyFailureDetector(nodes: List[ActorRef]) extends Actor with FailureDetector {
   val log = Logging(context.system, this)
+  var liveNodes : Set[ActorRef] = Set() ++ nodes
 
   def kill(node: ActorRef) {
     log.info("Killing " + node)
+    liveNodes = liveNodes - node
     node ! Stop
     val otherNodes = nodes.filter(n => n.compareTo(node) != 0)
     otherNodes.map(n => n ! SuspectedFailure(node))
   }
 
+  def handle_get_live_nodes() {
+    sender() ! liveNodes
+  }
+
   def receive = {
     case Kill(node) => kill(node)
+    case GetLiveNodes => handle_get_live_nodes
     case _ => log.error("Unknown message")
   }
 
@@ -75,7 +88,7 @@ class HackyFailureDetector(nodes: List[ActorRef]) extends Actor with FailureDete
 
 // Class variable for PerfectLink.
 object PerfectLink {
-  private val timeoutMillis = 500
+  private val timerMillis = 500
 }
 
 /**
@@ -97,7 +110,7 @@ class PerfectLink(parent: Node, destination: ActorRef, name: String) {
     parent.log.info("Sending SLDeliver(" + parentName + "," + msg + ")")
     destination ! SLDeliver(parentName, msg)
     if (unacked.size == 0) {
-      parent.schedule_timer(PerfectLink.timeoutMillis)
+      parent.schedule_timer(PerfectLink.timerMillis)
     }
     unacked += (msg.id -> msg)
   }
@@ -136,7 +149,7 @@ class PerfectLink(parent: Node, destination: ActorRef, name: String) {
     }
     unacked.values.map(msg => sl_send(msg))
     if (unacked.size != 0) {
-      parent.schedule_timer(PerfectLink.timeoutMillis)
+      parent.schedule_timer(PerfectLink.timerMillis)
     }
   }
 }
@@ -146,12 +159,14 @@ class PerfectLink(parent: Node, destination: ActorRef, name: String) {
  */
 class TimerQueue(scheduler: Scheduler, source: ActorRef) {
   var timerPending = false
+  var active = true
 
   def maybe_schedule(timerMillis: Int) {
     if (timerPending) {
       return
     }
     timerPending = true
+    active = true
     scheduler.scheduleOnce(
       timerMillis milliseconds,
       source,
@@ -160,6 +175,7 @@ class TimerQueue(scheduler: Scheduler, source: ActorRef) {
 
   def handle_tick() {
     timerPending = false
+    active = false
   }
 }
 
@@ -224,6 +240,10 @@ class Node(id: Int) extends Actor {
     allLinks.map(link => link.handle_suspected_recovery(destination))
   }
 
+  def handle_active_query() {
+    sender() ! timerQueue.active
+  }
+
   def receive = {
     // Node messages:
     case AddLink(dst) => add_link(dst)
@@ -236,6 +256,7 @@ class Node(id: Int) extends Actor {
     case SuspectedFailure(destination) => handle_suspected_failure(destination)
     case SuspectedRecovery(destination) => handle_suspected_recovery(destination)
     case Tick => handle_tick
+    case StillActiveQuery => handle_active_query
     case _ => log.error("Unknown message")
   }
 }
@@ -268,6 +289,13 @@ object Main extends App {
   nodes(numNodes-1) ! RBBroadcast(DataMessage("Message"))
   nodes(0) ! RBBroadcast(DataMessage("Message"))
 
-  // TODO(cs): need to figure out how to detect when the test is over.
-  // Otherwise, Akka just sits in an infinite loop.
+  implicit val timeout = Timeout(2 seconds)
+  val liveNodes = Await.result(fd.ask(GetLiveNodes), 500 milliseconds).
+                        asInstanceOf[Set[ActorRef]]
+  while (liveNodes.map(
+         n => Await.result(n.ask(StillActiveQuery), 500 milliseconds).
+              asInstanceOf[Boolean]).reduceLeft(_ | _)) {
+    Thread sleep 500
+  }
+  system.shutdown()
 }
