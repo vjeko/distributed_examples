@@ -262,10 +262,10 @@ object Main extends App {
   val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
     val l1 = system.actorOf(
       Props(classOf[PerfectLink], src, system.scheduler),
-      name=src.path.name + "->" + dst.path.name)
+      name=src.path.name + "-" + dst.path.name)
     val l2 = system.actorOf(
       Props(classOf[PerfectLink], dst, system.scheduler),
-      name=dst.path.name + "->" + src.path.name)
+      name=dst.path.name + "-" + src.path.name)
     // Can't pass the destination in the ctor because of a circular dependency.
     // Annoying that we have to asynchronously configure these objects...
     // we're not guarenteed that they'll be in a valid state!
