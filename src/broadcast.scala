@@ -254,15 +254,18 @@ object Main extends App {
   val system = ActorSystem("Broadcast")
 
   val numNodes = 3
-  val nodes = List.range(0, numNodes).map(_ => system.actorOf(Props(new Node())))
+  val nodes = List.range(0, numNodes).map(i =>
+    system.actorOf(Props[Node], name="node" + i))
   var links : Set[ActorRef] = Set()
   var node2links : Map[ActorRef,Set[ActorRef]] = Map()
 
   val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
     val l1 = system.actorOf(
-      Props(new PerfectLink(src, system.scheduler)))
+      Props(classOf[PerfectLink], src, system.scheduler),
+      name=src.path.name + "->" + dst.path.name)
     val l2 = system.actorOf(
-      Props(new PerfectLink(dst, system.scheduler)))
+      Props(classOf[PerfectLink], dst, system.scheduler),
+      name=dst.path.name + "->" + src.path.name)
     // Can't pass the destination in the ctor because of a circular dependency.
     // Annoying that we have to asynchronously configure these objects...
     // we're not guarenteed that they'll be in a valid state!
@@ -281,11 +284,10 @@ object Main extends App {
     node2links += (src -> (node2links.getOrElse(src, Set()) + l1))
     node2links += (dst -> (node2links.getOrElse(dst, Set()) + l2))
   }
-  // N.B. nodes have links to themselves.
-  val srcDstPairs = for(src <- nodes; dst <- nodes) yield (src, dst)
+  val srcDstPairs  = for (i <- 0 to numNodes-1; j <- i+1 to numNodes-1) yield (nodes(i), nodes(j))
   srcDstPairs.map(tuple => createLinksForNodes(tuple._1, tuple._2))
 
-  val fd = system.actorOf(Props(new HackyFailureDetector(node2links)))
+  val fd = system.actorOf(Props(classOf[HackyFailureDetector],node2links), name="fd")
 
   // TODO(cs): technically we should block here until all configuration
   // messages have been delivered. i.e. check that all Nodes have all their
