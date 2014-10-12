@@ -290,4 +290,7 @@ object Main extends App {
   nodes(3) ! RBBroadcast(DataMessage("Message"))
   nodes(2) ! RBBroadcast(DataMessage("Message"))
   nodes(4) ! RBBroadcast(DataMessage("Message"))
+
+  // TODO(cs): need to figure out how to detect when the test is over.
+  // Otherwise, Akka just sits in an infinite loop.
 }
