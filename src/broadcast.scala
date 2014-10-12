@@ -148,15 +148,14 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
   }
 
   def handle_suspected_failure(suspect: ActorRef) {
-    // TODO(cs): does == work for ActorRefs?
-    if (suspect == destination) {
+    if (suspect.compareTo(destination) == 0) {
       destinationSuspected = true
     }
   }
 
   def handle_suspected_recovery(suspect: ActorRef) {
-    if (suspect == destination) {
-      destinationSsuspected = false
+    if (suspect.compareTo(destination) == 0) {
+      destinationSuspected = false
     }
   }
 
