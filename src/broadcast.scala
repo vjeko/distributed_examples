@@ -91,7 +91,7 @@ object PerfectLink {
  *
  * N.B. A Node (parent) and its PerfectLinks must be co-located.
  */
-class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
+class PerfectLink(parent: ActorRef) extends Actor {
   // N.B. destination is the destination Node's PerfectLink
   var destination : ActorRef = null
   var parentID : Int = -1
@@ -124,9 +124,10 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     log.info("Sending SLDeliver(" + parentID + "," + msg + ")")
     destination ! SLDeliver(parentID, msg)
     if (unacked.size == 0) {
-      scheduler.scheduleOnce(PerfectLink.timeout_ms milliseconds,
-                             self,
-                             Tick)
+      context.system.scheduler.scheduleOnce(
+        PerfectLink.timeout_ms milliseconds,
+        self,
+        Tick)
     }
     unacked += (msg.id -> msg)
   }
@@ -169,9 +170,10 @@ class PerfectLink(parent: ActorRef, scheduler: Scheduler) extends Actor {
     }
     unacked.values.map(msg => sl_send(msg))
     if (unacked.size != 0) {
-      scheduler.scheduleOnce(PerfectLink.timeout_ms milliseconds,
-                             self,
-                             Tick)
+      context.system.scheduler.scheduleOnce(
+        PerfectLink.timeout_ms milliseconds,
+        self,
+        Tick)
     }
   }
 
@@ -261,10 +263,10 @@ object Main extends App {
 
   val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
     val l1 = system.actorOf(
-      Props(classOf[PerfectLink], src, system.scheduler),
+      Props(classOf[PerfectLink], src),
       name=src.path.name + "-" + dst.path.name)
     val l2 = system.actorOf(
-      Props(classOf[PerfectLink], dst, system.scheduler),
+      Props(classOf[PerfectLink], dst),
       name=dst.path.name + "-" + src.path.name)
     // Can't pass the destination in the ctor because of a circular dependency.
     // Annoying that we have to asynchronously configure these objects...
