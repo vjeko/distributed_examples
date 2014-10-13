@@ -3,12 +3,14 @@ import akka.actor.{ ActorSystem, Scheduler, Props }
 import akka.pattern.ask
 import akka.event.Logging
 import akka.util.Timeout
+import akka.cluster.VectorClock
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 
 // -- Initialization messages --
 case class AddLink(link: ActorRef)
+case class SetVectorClock(vc: VectorClock)
 
 // -- Base message type --
 object DataMessage {
@@ -27,8 +29,8 @@ case class StillActiveQuery()
 case class RBBroadcast(msg: DataMessage)
 
 // -- Link -> Link messages --
-case class SLDeliver(senderName: String, msg: DataMessage)
-case class ACK(senderName: String, msgID: Int)
+case class SLDeliver(senderName: String, msg: DataMessage, vc: VectorClock)
+case class ACK(senderName: String, msgID: Int, vc: VectorClock)
 
 // -- Node -> Node messages --
 case class Tick()
@@ -77,7 +79,7 @@ object PerfectLink {
 /**
  * PerfectLink. Attached to Nodes.
  */
-class PerfectLink(parent: Node, destination: ActorRef, name: String) {
+class PerfectLink(parent: BroadcastNode, destination: ActorRef, name: String) {
   var parentName = parent.name
   var delivered : Set[Int] = Set()
   var unacked : Map[Int,DataMessage] = Map()
@@ -90,17 +92,17 @@ class PerfectLink(parent: Node, destination: ActorRef, name: String) {
   }
 
   def sl_send(msg: DataMessage) {
-    parent.log.info("Sending SLDeliver(" + parentName + "," + msg + ")")
-    destination ! SLDeliver(parentName, msg)
+    parent.vcLog("Sending SLDeliver(" + parentName + "," + msg + ")")
+    destination ! SLDeliver(parentName, msg, parent.vc)
     if (unacked.size == 0) {
       parent.schedule_timer(PerfectLink.timerMillis)
     }
     unacked += (msg.id -> msg)
   }
 
-  def handle_sl_deliver(senderName: String, msg: DataMessage) {
-    parent.log.info("Sending ACK(" + parentName + "," + msg.id + ")")
-    destination ! ACK(parentName, msg.id)
+  def handle_sl_deliver(senderName: String, msg: DataMessage, vc: VectorClock) {
+    parent.vcLog("Sending ACK(" + parentName + "," + msg.id + ")", otherVC=vc)
+    destination ! ACK(parentName, msg.id, parent.vc)
 
     if (delivered contains msg.id) {
       return
@@ -110,7 +112,8 @@ class PerfectLink(parent: Node, destination: ActorRef, name: String) {
     parent.handle_pl_deliver(senderName, msg)
   }
 
-  def handle_ack(senderName: String, msgID: Int) {
+  def handle_ack(senderName: String, msgID: Int, vc: VectorClock) {
+    parent.vcLog("Recieved ACK(" + senderName + " " + msgID + ")", otherVC=vc)
     unacked -= msgID
   }
 
@@ -163,14 +166,15 @@ class TimerQueue(scheduler: Scheduler, source: ActorRef) {
 }
 
 /**
- * Node Actor. Implements Reliable Broadcast.
+ * BroadcastNode Actor. Implements Reliable Broadcast.
  */
-class Node(id: Int) extends Actor {
+class BroadcastNode(id: Int) extends Actor {
   var name = self.path.name
   val timerQueue = new TimerQueue(context.system.scheduler, self)
   var allLinks: Set[PerfectLink] = Set()
   var dst2link: Map[String, PerfectLink] = Map()
   var delivered: Set[Int] = Set()
+  var vc = new VectorClock()
   val log = Logging(context.system, this)
 
   def add_link(dst: ActorRef) {
@@ -180,7 +184,7 @@ class Node(id: Int) extends Actor {
   }
 
   def rb_broadcast(msg: DataMessage) {
-    log.info("Initiating RBBroadcast(" + msg + ")")
+    vcLog("Initiating RBBroadcast(" + msg + ")")
     beb_broadcast(msg)
   }
 
@@ -198,21 +202,32 @@ class Node(id: Int) extends Actor {
     }
 
     delivered = delivered + msg.id
-    log.info("RBDeliver of message " + msg + " from " + senderName + " to " + name)
+    vcLog("RBDeliver of message " + msg + " from " + senderName + " to " + name)
     beb_broadcast(msg)
   }
 
+  def vcLog(msg: String, otherVC:VectorClock = null) {
+    vc = vc :+ name
+    if (otherVC != null) {
+      vc = vc.merge(otherVC)
+    }
+    // TODO(cs): print vc as json instead of default toString so that ShiViz
+    // can understand it.
+    log.info(vc + " " + msg)
+  }
+
+  def schedule_timer(timerMillis: Int) {
+    timerQueue.maybe_schedule(timerMillis)
+  }
+
   def stop() {
+    vcLog("Crashing")
     context.stop(self)
   }
 
   def handle_tick() {
     timerQueue.handle_tick
     allLinks.map(link => link.handle_tick)
-  }
-
-  def schedule_timer(timerMillis: Int) {
-    timerQueue.maybe_schedule(timerMillis)
   }
 
   def handle_suspected_failure(destination: ActorRef) {
@@ -233,14 +248,18 @@ class Node(id: Int) extends Actor {
     case Stop => stop
     case RBBroadcast(msg) => rb_broadcast(msg)
     // Link messages:
-    case SLDeliver(senderName, msg) => dst2link.getOrElse(senderName, null).handle_sl_deliver(senderName, msg)
-    case ACK(senderName, msgID) => dst2link.getOrElse(senderName, null).handle_ack(senderName, msgID)
+    case SLDeliver(senderName, msg, vc) => {
+      dst2link.getOrElse(senderName, null).handle_sl_deliver(senderName, msg, vc)
+    }
+    case ACK(senderName, msgID, vc) => {
+      dst2link.getOrElse(senderName, null).handle_ack(senderName, msgID, vc)
+    }
     // FailureDetector messages:
     case SuspectedFailure(destination) => handle_suspected_failure(destination)
     case SuspectedRecovery(destination) => handle_suspected_recovery(destination)
     case Tick => handle_tick
     case StillActiveQuery => handle_active_query
-    case _ => log.error("Unknown message")
+    case unknown => log.error("Unknown message " + unknown)
   }
 }
 
@@ -250,7 +269,7 @@ object Main extends App {
   val numNodes = 4
   println ("numNodes: " + numNodes)
   val nodes = List.range(0, numNodes).map(i =>
-    system.actorOf(Props(classOf[Node], i), name="node" + i))
+    system.actorOf(Props(classOf[BroadcastNode], i), name="node" + i))
 
   val createLinksForNodes = (src: ActorRef, dst: ActorRef) => {
     src ! AddLink(dst)
