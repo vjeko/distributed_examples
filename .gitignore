@@ -1,3 +1,5 @@
 src/target
 src/project
 *.log
+target
+project
