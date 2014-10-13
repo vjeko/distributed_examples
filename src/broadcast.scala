@@ -1,3 +1,5 @@
+// Possible bug: Nodes don't send broadcasts to themselves.
+
 import akka.actor.{ Actor, ActorRef }
 import akka.actor.{ ActorSystem, Scheduler, Props }
 import akka.pattern.ask
@@ -288,7 +290,7 @@ class BroadcastNode(id: Int) extends Actor {
 object Main extends App {
   val system = ActorSystem("Broadcast")
 
-  val numNodes = 4
+  val numNodes = 3
   val nodes = List.range(0, numNodes).map(i =>
     system.actorOf(Props(classOf[BroadcastNode], i), name="node" + i))
 
@@ -308,9 +310,9 @@ object Main extends App {
   // Sample Execution:
 
   nodes(0) ! RBBroadcast(DataMessage("Message1"))
-  fd.kill(nodes(1))
-  nodes(numNodes-1) ! RBBroadcast(DataMessage("Message2"))
-  nodes(0) ! RBBroadcast(DataMessage("Message3"))
+  //fd.kill(nodes(1))
+  //nodes(numNodes-1) ! RBBroadcast(DataMessage("Message2"))
+  //nodes(0) ! RBBroadcast(DataMessage("Message3"))
 
   implicit val timeout = Timeout(2 seconds)
   while (fd.liveNodes.map(
