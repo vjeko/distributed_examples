@@ -7,6 +7,7 @@ import akka.cluster.VectorClock
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
+import scala.util.parsing.json.JSONObject
 
 // -- Initialization messages --
 case class AddLink(link: ActorRef)
@@ -61,7 +62,6 @@ class HackyFailureDetector(nodes: List[ActorRef]) extends FailureDetector {
   var liveNodes : Set[ActorRef] = Set() ++ nodes
 
   def kill(node: ActorRef) {
-    println ("Killing " + node)
     liveNodes = liveNodes - node
     node ! Stop
     val otherNodes = nodes.filter(n => n.compareTo(node) != 0)
@@ -211,9 +211,7 @@ class BroadcastNode(id: Int) extends Actor {
     if (otherVC != null) {
       vc = vc.merge(otherVC)
     }
-    // TODO(cs): print vc as json instead of default toString so that ShiViz
-    // can understand it.
-    log.info(vc + " " + msg)
+    log.info(JSONObject(vc.versions).toString() + " " + msg)
   }
 
   def schedule_timer(timerMillis: Int) {
@@ -267,7 +265,6 @@ object Main extends App {
   val system = ActorSystem("Broadcast")
 
   val numNodes = 4
-  println ("numNodes: " + numNodes)
   val nodes = List.range(0, numNodes).map(i =>
     system.actorOf(Props(classOf[BroadcastNode], i), name="node" + i))
 
