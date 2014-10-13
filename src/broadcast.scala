@@ -22,6 +22,11 @@ object DataMessage {
 
 case class DataMessage(data: String) {
   var id = DataMessage.get_next_id
+
+  override
+  def toString() : String = {
+    "DataMessage(" + id + "," + data + ")"
+  }
 }
 
 // -- main() -> Node messages --
@@ -81,18 +86,25 @@ object PerfectLink {
  */
 class PerfectLink(parent: BroadcastNode, destination: ActorRef, name: String) {
   var parentName = parent.name
-  var delivered : Set[Int] = Set()
-  var unacked : Map[Int,DataMessage] = Map()
+  var destinationName = destination.path.name
   // Whether the destination is suspected to be crashed, according to a
   // FailureDetector.
   var destinationSuspected = false
+  var delivered : Set[Int] = Set()
+  var unacked : Map[Int,DataMessage] = Map()
+  // Messages we refused to send b/c of suspected crash.
+  var deliveryRefused : Map[Int,DataMessage] = Map()
 
   def pl_send(msg: DataMessage) {
     sl_send(msg)
   }
 
   def sl_send(msg: DataMessage) {
-    parent.vcLog("Sending SLDeliver(" + parentName + "," + msg + ")")
+    if (destinationSuspected) {
+      deliveryRefused += (msg.id -> msg)
+      return
+    }
+    parent.vcLog("Sending SLDeliver(" + msg + ") to " + destinationName)
     destination ! SLDeliver(parentName, msg, parent.vc)
     if (unacked.size == 0) {
       parent.schedule_timer(PerfectLink.timerMillis)
@@ -101,7 +113,9 @@ class PerfectLink(parent: BroadcastNode, destination: ActorRef, name: String) {
   }
 
   def handle_sl_deliver(senderName: String, msg: DataMessage, vc: VectorClock) {
-    parent.vcLog("Sending ACK(" + parentName + "," + msg.id + ")", otherVC=vc)
+    parent.vcLog("Received SLDeliver(" + msg + ") from " +
+                 destinationName, otherVC=vc)
+    parent.vcLog("Sending ACK(" + msg.id + ") to " + destinationName)
     destination ! ACK(parentName, msg.id, parent.vc)
 
     if (delivered contains msg.id) {
@@ -113,19 +127,28 @@ class PerfectLink(parent: BroadcastNode, destination: ActorRef, name: String) {
   }
 
   def handle_ack(senderName: String, msgID: Int, vc: VectorClock) {
-    parent.vcLog("Recieved ACK(" + senderName + " " + msgID + ")", otherVC=vc)
+    parent.vcLog("Received ACK(" + msgID + ") from " +
+                 destinationName, otherVC=vc)
     unacked -= msgID
   }
 
   def handle_suspected_failure(suspect: ActorRef) {
     if (suspect.compareTo(destination) == 0) {
+      parent.vcLog("Suspected crash of " + destinationName)
       destinationSuspected = true
     }
   }
 
   def handle_suspected_recovery(suspect: ActorRef) {
     if (suspect.compareTo(destination) == 0) {
+      parent.vcLog("Suspected recovery of " + destinationName)
       destinationSuspected = false
+      deliveryRefused.values.map(msg => sl_send(msg))
+      unacked = unacked ++ deliveryRefused
+      if (unacked.size != 0) {
+        parent.schedule_timer(PerfectLink.timerMillis)
+      }
+      deliveryRefused = Map()
     }
   }
 
@@ -202,7 +225,7 @@ class BroadcastNode(id: Int) extends Actor {
     }
 
     delivered = delivered + msg.id
-    vcLog("RBDeliver of message " + msg + " from " + senderName + " to " + name)
+    vcLog("RBDeliver of message " + msg + " from " + senderName)
     beb_broadcast(msg)
   }
 
@@ -224,6 +247,7 @@ class BroadcastNode(id: Int) extends Actor {
   }
 
   def handle_tick() {
+    vcLog("Handle Tick()")
     timerQueue.handle_tick
     allLinks.map(link => link.handle_tick)
   }
@@ -283,10 +307,10 @@ object Main extends App {
 
   // Sample Execution:
 
-  nodes(0) ! RBBroadcast(DataMessage("Message"))
+  nodes(0) ! RBBroadcast(DataMessage("Message1"))
   fd.kill(nodes(1))
-  nodes(numNodes-1) ! RBBroadcast(DataMessage("Message"))
-  nodes(0) ! RBBroadcast(DataMessage("Message"))
+  nodes(numNodes-1) ! RBBroadcast(DataMessage("Message2"))
+  nodes(0) ! RBBroadcast(DataMessage("Message3"))
 
   implicit val timeout = Timeout(2 seconds)
   while (fd.liveNodes.map(
