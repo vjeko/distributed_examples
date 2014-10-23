@@ -1,3 +1,4 @@
+/**
 import akka.actor.{ Actor, ActorRef, DeadLetter }
 import akka.actor.ActorSystem
 import akka.actor.Props
@@ -115,3 +116,4 @@ object Main extends App {
   nodes(4) ! RB_Broadcast(DataMessage(5, "Message"))
 
 }
+**/
