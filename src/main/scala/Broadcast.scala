@@ -1,4 +1,3 @@
-/**
 import akka.actor.{ Actor, ActorRef, DeadLetter }
 import akka.actor.ActorSystem
 import akka.actor.Props
@@ -44,7 +43,7 @@ case class BEB_Deliver(msg: DataMessage)
  * not exist at that point in time).
  * 
  */
-class Node(ID: Int) extends Actor {
+class Node extends Actor {
   type NodeSetT = Set[ActorRef]
   type DeliveredT = Set[DataMessage]
 
@@ -81,7 +80,7 @@ class Node(ID: Int) extends Actor {
   
 
   def init(nodes: NodeSetT) {
-    println("Initializing an actor with ID: " + ID);
+    println("Initializing actor " + self.path.name)
     allActors = nodes
   }
   
@@ -102,18 +101,14 @@ object Main extends App {
   val system = ActorSystem("Broadcast")
 
   val ids = List.range(0, 5);
-  val startFun = (i: Int) => system.actorOf(Props(new Node(i)))
+  val startFun = (i: Int) => 
+    system.actorOf(Props[Node], name = "instrumented-" + i.toString())
+  
   val nodes = ids.map(i => startFun(i))
 
   nodes.map(node => node ! Init(nodes.toSet))
   nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]) )
 
   nodes(0) ! RB_Broadcast(DataMessage(1, "Message"))
-  nodes(2) ! RB_Broadcast(DataMessage(2, "Message"))
-  nodes(1) ! Stop
-  nodes(3) ! RB_Broadcast(DataMessage(3, "Message"))
-  nodes(2) ! RB_Broadcast(DataMessage(4, "Message"))
-  nodes(4) ! RB_Broadcast(DataMessage(5, "Message"))
 
 }
-**/

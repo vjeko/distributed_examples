@@ -1,1 +1,1 @@
-Run: sbt check
+Run: sbt run

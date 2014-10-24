@@ -3,29 +3,30 @@ package sample;
 import akka.actor.ActorRef;
 import akka.pattern.AskSupport;
 import akka.actor.ActorSystem;
+import akka.dispatch.Envelope;
+import akka.dispatch.MessageQueue;
+
+import scala.concurrent.impl.CallbackRunnable;
 
 privileged public aspect WeaveActor {
-
-  before(AskSupport askSupport, ActorRef actorRef, Object message):
-    execution(* akka.pattern.AskSupport$class.ask(..)) &&
-    args(askSupport, actorRef, message, ..)
-  {
-    String msg = message.toString();
-    if (!msg.startsWith("InitializeLogger")) {
-      System.out.println("Actor asked " + message);
-    }
-  }
   
     before():
     execution(* akka.actor.ActorSystem.actorOf(..))
   {
-      //System.out.println("actorOf");
   }
 
-    before():
-    execution(* akka.dispatch.MessageQueue.enqueue(..))
+    before(ActorRef receiver, Envelope handle):
+    execution(* akka.dispatch.MessageQueue.enqueue(..)) &&
+    args(receiver, handle, ..)
   {
-      //System.out.println("enqueue");
+      String message = handle.sender.path().name() + " -> " + receiver.path().name();
+      System.out.println(message);
+  }
+  
+    before(Runnable runnable):
+    execution(* akka.dispatch.MessageDispatcher.execute(..)) &&
+    args(runnable, ..)
+  {
   }
   
 }
