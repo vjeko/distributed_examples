@@ -1,11 +1,9 @@
+package broadcast;
+
 import akka.actor.{ Actor, ActorRef, DeadLetter }
 import akka.actor.ActorSystem
 import akka.actor.Props
 
-package object types {
-  type NodeSetT = Set[ActorRef]
-  type DeliveredT = Set[DataMessage]
-}
 
 case class Stop()
 case class Init(msg: Set[ActorRef])
@@ -94,21 +92,4 @@ class Node extends Actor {
     case BEB_Deliver(msg) => beb_deliver(msg)
     case _ => println("Unknown message")
   }
-}
-
-object Main extends App {
-  
-  val system = ActorSystem("Broadcast")
-
-  val ids = List.range(0, 5);
-  val startFun = (i: Int) => 
-    system.actorOf(Props[Node], name = "instrumented-" + i.toString())
-  
-  val nodes = ids.map(i => startFun(i))
-
-  nodes.map(node => node ! Init(nodes.toSet))
-  nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]) )
-
-  nodes(0) ! RB_Broadcast(DataMessage(1, "Message"))
-
 }

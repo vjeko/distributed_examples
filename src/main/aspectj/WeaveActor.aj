@@ -2,6 +2,9 @@ package sample;
 
 import static java.lang.Thread.sleep;
 
+import akka.dispatch.verification.DPOR;
+
+import java.util.*;
 import akka.actor.ActorRef;
 import akka.actor.Actor;
 import akka.actor.ActorCell;
@@ -12,50 +15,46 @@ import akka.dispatch.MessageQueue;
 
 import scala.concurrent.impl.CallbackRunnable;
 
-		
-		///try{
-		//    sleep(1500);
-		//} catch (InterruptedException e){}
+
 
 privileged public aspect WeaveActor {
   
-    before(MessageQueue me, ActorRef receiver, Envelope handle):
-    execution(* akka.dispatch.MessageQueue.enqueue(..)) &&
-    args(receiver, handle, ..) && this(me)
-  {
-      String message =
-      	"MessageQueue:enqueue(" + 
-      	handle.sender.path().name()
-      	+ " -> " + receiver.path().name() + ") Remainning: "
-      	+ me.numberOfMessages();
-      System.out.println(message);
+  DPOR dpor = new DPOR();
+  
+  before(ActorCell me, Object msg):
+  execution(* akka.actor.ActorCell.receiveMessage(..)) &&
+  args(msg, ..) && this(me) {
+	dpor.beginMessageReceive(me);
+  }
+  
+ 
+ 
+  after(ActorCell me, Object msg):
+  execution(* akka.actor.ActorCell.receiveMessage(..)) &&
+  args(msg, ..) && this(me) {
+	dpor.afterMessageReceive(me);
   }
  
+ 
   
-    before(ActorCell receiver, Envelope invocation):
-    execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
-    args(receiver, invocation, ..)
-  {
+  before(MessageQueue me, ActorRef receiver, Envelope handle):
+  execution(* akka.dispatch.MessageQueue.enqueue(..)) &&
+  args(receiver, handle, ..) && this(me) {
+	dpor.beforeEnqueue(me, receiver, handle);
+  }
+ 
+ 
   
-  		Actor actor = receiver.actor();
-  		if (actor == null) return;
-  		
-    	System.out.println("before | dispatch(" 
-    		+ actor.self().path().name() + ")");
-  
+  before(ActorCell receiver, Envelope invocation):
+  execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
+  args(receiver, invocation, ..) {
   }
   
-    after(ActorCell receiver, Envelope invocation):
-    execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
-    args(receiver, invocation, ..)
-  {
   
-  		Actor actor = receiver.actor();
-  		if (actor == null) return;
-  		
-    	System.out.println("after  | dispatch(" 
-    		+ actor.self().path().name() + ")");
   
+  after(ActorCell receiver, Envelope invocation):
+  execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
+  args(receiver, invocation, ..) {
   }
 
 }
