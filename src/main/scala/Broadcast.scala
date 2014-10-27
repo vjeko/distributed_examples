@@ -63,7 +63,7 @@ class Node extends Actor {
   
 
   def rb_deliver(msg: DataMessage) {
-    println("Reliable broadcast delivery of mesage " + msg)
+    println(self.path.name + " reliably delivered a broadcast mesage " + msg)
   }
   
 
