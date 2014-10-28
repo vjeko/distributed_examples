@@ -17,8 +17,23 @@ import scala.concurrent.impl.CallbackRunnable;
 
 
 privileged public aspect WeaveActor {
-  
+
   DPOR dpor = new DPOR();
+    
+  pointcut publicOperation(): 
+  execution(public * akka.dispatch.MessageQueue.enqueue(..));
+   	Object around() : publicOperation() {
+   	System.out.println("around");
+	//return proceed();
+	return new Object();
+  }
+   
+  before(MessageQueue me, ActorRef receiver, Envelope handle):
+  execution(* akka.dispatch.MessageQueue.enqueue(..)) &&
+  args(receiver, handle, ..) && this(me) {
+	dpor.beforeEnqueue(me, receiver, handle);
+  }
+  
   
   before(ActorCell me, Object msg):
   execution(* akka.actor.ActorCell.receiveMessage(Object)) &&
@@ -26,28 +41,17 @@ privileged public aspect WeaveActor {
 	dpor.beginMessageReceive(me);
   }
   
- 
- 
   after(ActorCell me, Object msg):
   execution(* akka.actor.ActorCell.receiveMessage(Object)) &&
   args(msg, ..) && this(me) {
 	dpor.afterMessageReceive(me);
   }
- 
   
-  before(MessageQueue me, ActorRef receiver, Envelope handle):
-  execution(* akka.dispatch.MessageQueue.enqueue(..)) &&
-  args(receiver, handle, ..) && this(me) {
-	dpor.beforeEnqueue(me, receiver, handle);
-  }
- 
   
   before(ActorCell receiver, Envelope invocation):
   execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
   args(receiver, invocation, ..) {
   }
-  
-  
   
   after(ActorCell receiver, Envelope invocation):
   execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
