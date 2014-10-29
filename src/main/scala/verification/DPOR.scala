@@ -12,27 +12,30 @@ import scala.collection.mutable.Queue
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 
+
 class DPOR {
+  
+  type allowedT = HashSet[(ActorCell, Envelope)]
+  type activeT = HashMap[ActorRef, Queue[(ActorCell, Envelope)]]
+  type dispacthersT = HashMap[ActorRef, MessageDispatcher]
 
-  val allowedMsgs = new HashSet[(ActorCell, Envelope)]
-  val active = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]
-  val dispatchers = new HashMap[ActorRef, MessageDispatcher]
-
-  var counter : Integer = 0
+  val allowedMsgs = new allowedT
+  val active = new activeT
+  val dispatchers = new dispacthersT
   
   
   def beginMessageReceive(cell: ActorCell) {
-    println(" ↓↓↓↓↓↓↓↓↓ " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ ")
+    println(Console.GREEN 
+        + " ↓↓↓↓↓↓↓↓↓ " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
+        Console.RESET)
   }
-  
-  
   
 
   def afterMessageReceive(cell: ActorCell) {
-
-    println(" ↑↑↑↑↑↑↑↑↑ " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ ")
+    println(Console.RED 
+        + " ↑↑↑↑↑↑↑↑↑ " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
+        + Console.RESET)
     schedule_new_message()
-
   }
   
   
@@ -41,25 +44,24 @@ class DPOR {
     active.headOption match {
       case Some((receiver, queue)) =>
         
-        if (queue.isEmpty == false) {
-          val (new_cell, envelope) = queue.dequeue()
-          
-          fire(new_cell, envelope)
-        } else {
+        if (queue.isEmpty == true) {
           active.remove(receiver) match {
             case Some(key) => "Removed the last element in the queue..."
-            case None => throw new Exception("the queue should be there")
+            case None => throw new Exception("internal error")
           }
           schedule_new_message()
+        } else {
+          val (new_cell, envelope) = queue.dequeue()
+          dispatch_new_message(new_cell, envelope)
         }
 
-      case None => println("No more elements!")
+      case None => println("no more elements")
     }
   }
   
   
 
-  def fire(cell: ActorCell, envelope: Envelope) = {
+  def dispatch_new_message(cell: ActorCell, envelope: Envelope) = {
     val src = envelope.sender.path.name
     val dst = cell.self.path.name
     
@@ -69,7 +71,7 @@ class DPOR {
     allowedMsgs += value
     dispatchers.get(cell.self) match {
       case Some(dispatcher) => dispatcher.dispatch(cell, envelope)
-      case None => println("Not suppose to happen!")
+      case None => throw new Exception("internal error")
     }
   }
   
@@ -78,39 +80,29 @@ class DPOR {
   def aroundDispatch(dispatcher: MessageDispatcher, cell: ActorCell, 
       envelope: Envelope): Boolean = {
     
+    val value: (ActorCell, Envelope) = (cell, envelope)
     val receiver = cell.self
-    
-    val value: (ActorCell, Envelope) = (cell, envelope)    
-    counter = counter + 1
-    
     val src = envelope.sender.path.name
     val dst = receiver.path.name
     
     if(src == "deadLetters" | src == "$a") {
-      println("Allowing default "  + src + " -> " + dst)
+      println("allowing default "  + src + " -> " + dst)
       return true  
     }
     
     if (allowedMsgs contains value) {
-      return true 
+      allowedMsgs.remove(value) match {
+        case true => return true
+        case false => throw new Exception("internal error")
+      }
     }
     
     dispatchers(receiver) = dispatcher
-    var msgs = active.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
-    msgs.enqueue( (cell, envelope) )
-    active(receiver) = msgs
-    println("anqueue: " + src + " -> " + dst);    
+    val msgs = active.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
+    active(receiver) = msgs += ((cell, envelope))
+    println(Console.BLUE + "anqueue: " + src + " -> " + dst + Console.RESET);    
 
     return false
-  }
-  
-
-  def aroundEnqueue(queue: MessageQueue, receiver: ActorRef, envelope: Envelope): Boolean = {
-    return true
-  }
-  
-
-  def afterEnqueue(queue: MessageQueue, receiver: ActorRef, handle: Envelope) {
   }
 
 }

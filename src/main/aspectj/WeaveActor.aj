@@ -27,10 +27,7 @@ privileged public aspect WeaveActor {
   
   Object around(MessageQueue me, ActorRef receiver, Envelope handle):
   enqueueOperation(me, receiver, handle) {
-  	if (dpor.aroundEnqueue(me, receiver, handle))
-   		return proceed(me, receiver, handle);
-   	else
-   		return null;
+	return proceed(me, receiver, handle);
   }
    
   before(MessageQueue me, ActorRef receiver, Envelope handle):
