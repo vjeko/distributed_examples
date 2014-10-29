@@ -20,14 +20,14 @@ privileged public aspect WeaveActor {
 
   DPOR dpor = new DPOR();
     
-  pointcut publicOperation(ActorRef receiver, Envelope handle): 
-  execution(public * akka.dispatch.MessageQueue.enqueue(..)) &&
-  args(receiver, handle);
+  pointcut publicOperation(MessageQueue me, ActorRef receiver, Envelope handle): 
+  execution(public * akka.dispatch.MessageQueue.enqueue(ActorRef, Envelope)) &&
+  args(receiver, handle) && this(me);
   
-  Object around(ActorRef receiver, Envelope handle):
-  publicOperation(receiver, handle) {
-  	if (dpor.aroundEnqueue(receiver, handle))
-   		return proceed(receiver, handle);
+  Object around(MessageQueue me, ActorRef receiver, Envelope handle):
+  publicOperation(me, receiver, handle) {
+  	if (dpor.aroundEnqueue(me, receiver, handle))
+   		return proceed(me, receiver, handle);
    	else
    		return null;
   }
@@ -56,11 +56,13 @@ privileged public aspect WeaveActor {
   before(ActorCell receiver, Envelope invocation):
   execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
   args(receiver, invocation, ..) {
+  	System.out.println("MessageDispatcher.dispatch(start)");
   }
   
   after(ActorCell receiver, Envelope invocation):
   execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
   args(receiver, invocation, ..) {
+  System.out.println("MessageDispatcher.dispatch(end)");
   }
 
 }
