@@ -29,11 +29,6 @@ privileged public aspect WeaveActor {
   enqueueOperation(me, receiver, handle) {
 	return proceed(me, receiver, handle);
   }
-   
-  before(MessageQueue me, ActorRef receiver, Envelope handle):
-  execution(* akka.dispatch.MessageQueue.enqueue(..)) &&
-  args(receiver, handle, ..) && this(me) {
-  }
   
   
   
