@@ -11,6 +11,7 @@ import akka.pattern.AskSupport;
 import akka.actor.ActorSystem;
 import akka.dispatch.Envelope;
 import akka.dispatch.MessageQueue;
+import akka.dispatch.MessageDispatcher;
 
 import scala.concurrent.impl.CallbackRunnable;
 
@@ -20,12 +21,12 @@ privileged public aspect WeaveActor {
 
   DPOR dpor = new DPOR();
     
-  pointcut publicOperation(MessageQueue me, ActorRef receiver, Envelope handle): 
+  pointcut enqueueOperation(MessageQueue me, ActorRef receiver, Envelope handle): 
   execution(public * akka.dispatch.MessageQueue.enqueue(ActorRef, Envelope)) &&
   args(receiver, handle) && this(me);
   
   Object around(MessageQueue me, ActorRef receiver, Envelope handle):
-  publicOperation(me, receiver, handle) {
+  enqueueOperation(me, receiver, handle) {
   	if (dpor.aroundEnqueue(me, receiver, handle))
    		return proceed(me, receiver, handle);
    	else
@@ -50,19 +51,27 @@ privileged public aspect WeaveActor {
   args(msg, ..) && this(me) {
 	dpor.afterMessageReceive(me);
   }
-  
-  
-  
+
+
   before(ActorCell receiver, Envelope invocation):
   execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
   args(receiver, invocation, ..) {
   	System.out.println("MessageDispatcher.dispatch(start)");
   }
-  
-  after(ActorCell receiver, Envelope invocation):
+
+
+
+  pointcut dispatchOperation(MessageDispatcher me, ActorCell receiver, Envelope handle): 
   execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
-  args(receiver, invocation, ..) {
-  System.out.println("MessageDispatcher.dispatch(end)");
+  args(receiver, handle, ..) && this(me);
+
+  Object around(MessageDispatcher me, ActorCell receiver, Envelope handle):
+  dispatchOperation(me, receiver, handle) {
+  	if (dpor.aroundDispatch(me, receiver, handle))
+   		return proceed(me, receiver, handle);
+   	else
+   		return null;
   }
+
 
 }

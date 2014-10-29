@@ -5,7 +5,7 @@ import akka.actor.ActorRef
 import akka.actor.Actor
 import akka.dispatch.Envelope
 import akka.dispatch.MessageQueue
-import akka.dispatch.Dispatcher
+import akka.dispatch.MessageDispatcher
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.Queue
@@ -58,6 +58,11 @@ class DPOR {
     }
   }
   
+  def aroundDispatch(
+      dispatcher: MessageDispatcher, receiver: ActorCell, envelope: Envelope): Boolean = {
+    println("aroundDispatch")
+    return true;
+  }
 
   def aroundEnqueue(queue: MessageQueue, receiver: ActorRef, envelope: Envelope): Boolean = {
 
