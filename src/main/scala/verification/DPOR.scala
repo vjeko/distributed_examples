@@ -22,7 +22,7 @@ class DPOR {
   
   
   def beginMessageReceive(cell: ActorCell) {
-    println(cell.self.path.name + " receiveMessage")
+    println(" ↓↓↓↓↓↓↓↓↓ " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ ")
   }
   
   
@@ -30,23 +30,27 @@ class DPOR {
 
   def afterMessageReceive(cell: ActorCell) {
 
-    println(cell.self.path.name + ": receiveMessage (end) " + active.size)
+    println(" ↑↑↑↑↑↑↑↑↑ " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ ")
+    schedule_new_message()
 
+  }
+  
+  
+  def schedule_new_message() : Unit = {
+    
     active.headOption match {
       case Some((receiver, queue)) =>
         
         if (queue.isEmpty == false) {
-          
-          println(cell.self.path.name + ": dequeing a new message...")
           val (new_cell, envelope) = queue.dequeue()
+          
           fire(new_cell, envelope)
         } else {
-          println("No more elements in the queue!")
           active.remove(receiver) match {
             case Some(key) => "Removed the last element in the queue..."
-            case _ => "ERROR: Element does not exist!"
+            case None => throw new Exception("the queue should be there")
           }
-          afterMessageReceive(cell)
+          schedule_new_message()
         }
 
       case None => println("No more elements!")
@@ -56,7 +60,11 @@ class DPOR {
   
 
   def fire(cell: ActorCell, envelope: Envelope) = {
+    val src = envelope.sender.path.name
+    val dst = cell.self.path.name
     
+    println("scheduling: " + src + " -> " + dst)
+
     val value: (ActorCell, Envelope) = (cell, envelope)
     allowedMsgs += value
     dispatchers.get(cell.self) match {
@@ -70,8 +78,6 @@ class DPOR {
   def aroundDispatch(dispatcher: MessageDispatcher, cell: ActorCell, 
       envelope: Envelope): Boolean = {
     
-    println("aroundDispatch")
-    
     val receiver = cell.self
     
     val value: (ActorCell, Envelope) = (cell, envelope)    
@@ -80,17 +86,12 @@ class DPOR {
     val src = envelope.sender.path.name
     val dst = receiver.path.name
     
-    println("enqueing a message from "
-      + envelope.sender.path.name + " -> "
-      + receiver.path.name);
-
     if(src == "deadLetters" | src == "$a") {
-      println("Allowing default...")
+      println("Allowing default "  + src + " -> " + dst)
       return true  
     }
     
     if (allowedMsgs contains value) {
-      println("Should we allow this message? " + (allowedMsgs contains value))
       return true 
     }
     
@@ -98,6 +99,7 @@ class DPOR {
     var msgs = active.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
     msgs.enqueue( (cell, envelope) )
     active(receiver) = msgs
+    println("anqueue: " + src + " -> " + dst);    
 
     return false
   }

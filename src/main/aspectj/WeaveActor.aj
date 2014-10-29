@@ -53,13 +53,6 @@ privileged public aspect WeaveActor {
   }
 
 
-  before(ActorCell receiver, Envelope invocation):
-  execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
-  args(receiver, invocation, ..) {
-  	System.out.println("MessageDispatcher.dispatch(start)");
-  }
-
-
 
   pointcut dispatchOperation(MessageDispatcher me, ActorCell receiver, Envelope handle): 
   execution(* akka.dispatch.MessageDispatcher.dispatch(..)) &&
