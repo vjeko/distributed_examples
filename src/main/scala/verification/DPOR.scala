@@ -14,9 +14,9 @@ import scala.collection.mutable.HashSet
 
 class DPOR {
 
-  val allowedMsgs = new HashSet[(ActorRef, Envelope)]
-  val active = new HashMap[ActorRef, Queue[Envelope]]
-  val queues = new HashMap[ActorRef, MessageQueue]
+  val allowedMsgs = new HashSet[(ActorCell, Envelope)]
+  val active = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]
+  val dispatchers = new HashMap[ActorRef, MessageDispatcher]
 
   var counter : Integer = 0
   
@@ -26,20 +26,27 @@ class DPOR {
   }
   
   
+  
 
   def afterMessageReceive(cell: ActorCell) {
 
     println(cell.self.path.name + ": receiveMessage (end) " + active.size)
 
-    val value: (ActorRef, Envelope) = (cell.self, cell.currentMessage)
-    
     active.headOption match {
       case Some((receiver, queue)) =>
-        queue.headOption match {
-          case Some(envelope) => 
-            println(cell.self.path.name + ": dequeing a new message...")
-            fire(receiver, envelope)
-          case None => println("No more elements!")
+        
+        if (queue.isEmpty == false) {
+          
+          println(cell.self.path.name + ": dequeing a new message...")
+          val (new_cell, envelope) = queue.dequeue()
+          fire(new_cell, envelope)
+        } else {
+          println("No more elements in the queue!")
+          active.remove(receiver) match {
+            case Some(key) => "Removed the last element in the queue..."
+            case _ => "ERROR: Element does not exist!"
+          }
+          afterMessageReceive(cell)
         }
 
       case None => println("No more elements!")
@@ -48,25 +55,26 @@ class DPOR {
   
   
 
-  def fire(receiver: ActorRef, envelope: Envelope) = {
+  def fire(cell: ActorCell, envelope: Envelope) = {
     
-    val value: (ActorRef, Envelope) = (receiver, envelope)
+    val value: (ActorCell, Envelope) = (cell, envelope)
     allowedMsgs += value
-    queues.get(receiver) match {
-      case Some(queue) => queue.enqueue(receiver, envelope)
+    dispatchers.get(cell.self) match {
+      case Some(dispatcher) => dispatcher.dispatch(cell, envelope)
       case None => println("Not suppose to happen!")
     }
   }
   
-  def aroundDispatch(
-      dispatcher: MessageDispatcher, receiver: ActorCell, envelope: Envelope): Boolean = {
+  
+  
+  def aroundDispatch(dispatcher: MessageDispatcher, cell: ActorCell, 
+      envelope: Envelope): Boolean = {
+    
     println("aroundDispatch")
-    return true;
-  }
-
-  def aroundEnqueue(queue: MessageQueue, receiver: ActorRef, envelope: Envelope): Boolean = {
-
-    val value: (ActorRef, Envelope) = (receiver, envelope)    
+    
+    val receiver = cell.self
+    
+    val value: (ActorCell, Envelope) = (cell, envelope)    
     counter = counter + 1
     
     val src = envelope.sender.path.name
@@ -86,13 +94,19 @@ class DPOR {
       return true 
     }
     
-    queues(receiver) = queue
-    var msgs = active.getOrElse(receiver, new Queue[Envelope])
-    msgs.enqueue(envelope)
+    dispatchers(receiver) = dispatcher
+    var msgs = active.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
+    msgs.enqueue( (cell, envelope) )
     active(receiver) = msgs
 
     return false
   }
+  
+
+  def aroundEnqueue(queue: MessageQueue, receiver: ActorRef, envelope: Envelope): Boolean = {
+    return true
+  }
+  
 
   def afterEnqueue(queue: MessageQueue, receiver: ActorRef, handle: Envelope) {
   }
