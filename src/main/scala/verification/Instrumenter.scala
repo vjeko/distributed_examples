@@ -13,7 +13,7 @@ import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 
 
-class DPOR {
+class Instrumenter {
   
   type allowedT = HashSet[(ActorCell, Envelope)]
   type activeT = HashMap[ActorRef, Queue[(ActorCell, Envelope)]]

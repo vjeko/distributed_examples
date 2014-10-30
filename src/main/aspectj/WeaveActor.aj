@@ -2,7 +2,7 @@ package sample;
 
 import static java.lang.Thread.sleep;
 
-import akka.dispatch.verification.DPOR;
+import akka.dispatch.verification.Instrumenter;
 
 import akka.actor.ActorRef;
 import akka.actor.Actor;
@@ -19,7 +19,7 @@ import scala.concurrent.impl.CallbackRunnable;
 
 privileged public aspect WeaveActor {
 
-  DPOR dpor = new DPOR();
+  Instrumenter inst = new Instrumenter();
     
   pointcut enqueueOperation(MessageQueue me, ActorRef receiver, Envelope handle): 
   execution(public * akka.dispatch.MessageQueue.enqueue(ActorRef, Envelope)) &&
@@ -35,13 +35,13 @@ privileged public aspect WeaveActor {
   before(ActorCell me, Object msg):
   execution(* akka.actor.ActorCell.receiveMessage(Object)) &&
   args(msg, ..) && this(me) {
-	dpor.beginMessageReceive(me);
+	inst.beginMessageReceive(me);
   }
   
   after(ActorCell me, Object msg):
   execution(* akka.actor.ActorCell.receiveMessage(Object)) &&
   args(msg, ..) && this(me) {
-	dpor.afterMessageReceive(me);
+	inst.afterMessageReceive(me);
   }
 
 
@@ -52,7 +52,7 @@ privileged public aspect WeaveActor {
 
   Object around(MessageDispatcher me, ActorCell receiver, Envelope handle):
   dispatchOperation(me, receiver, handle) {
-  	if (dpor.aroundDispatch(me, receiver, handle))
+  	if (inst.aroundDispatch(me, receiver, handle))
    		return proceed(me, receiver, handle);
    	else
    		return null;
