@@ -6,6 +6,7 @@ import akka.dispatch.verification.Instrumenter;
 
 import akka.actor.ActorRef;
 import akka.actor.Actor;
+import akka.actor.Props;
 import akka.actor.ActorCell;
 import akka.pattern.AskSupport;
 import akka.actor.ActorSystem;
@@ -56,6 +57,20 @@ privileged public aspect WeaveActor {
    		return proceed(me, receiver, handle);
    	else
    		return null;
+  }
+  
+  
+  after(ActorSystem me, Props props) returning(ActorRef actor):
+  execution(ActorRef akka.actor.ActorSystem.actorOf(Props)) &&
+  args(props) && this(me) {
+  	inst.new_actor(actor);
+  }
+  
+  
+  after(ActorSystem me, Props props, String name) returning(ActorRef actor):
+  execution(ActorRef akka.actor.ActorSystem.actorOf(Props, String)) &&
+  args(props, name) && this(me) {
+  	inst.new_actor(actor);
   }
 
 

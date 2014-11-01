@@ -16,11 +16,9 @@ import scala.collection.mutable.HashSet
 class Scheduler {
   
   def init_trace() = {
-    
   }
   
   def new_event(cell: ActorCell, envelope: Envelope) = {
-    
   }
 
 }

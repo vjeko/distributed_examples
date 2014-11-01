@@ -9,6 +9,7 @@ import akka.dispatch.MessageDispatcher
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.Queue
+import scala.collection.mutable.Stack
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 
@@ -16,12 +17,32 @@ import scala.collection.mutable.HashSet
 class Instrumenter {
   
   type allowedT = HashSet[(ActorCell, Envelope)]
-  type activeT = HashMap[ActorRef, Queue[(ActorCell, Envelope)]]
+  type pendingEventsT = HashMap[ActorRef, Queue[(ActorCell, Envelope)]]
   type dispacthersT = HashMap[ActorRef, MessageDispatcher]
+  
+  type finishedEventsT = Stack[(ActorCell, Envelope)]
 
-  val allowedMsgs = new allowedT
-  val active = new activeT
   val dispatchers = new dispacthersT
+  
+  val allowedEvents = new allowedT
+  val pendingEvents = new pendingEventsT  
+  val finishedEvents = new finishedEventsT
+  val seenActors = new HashSet[ActorRef]
+  
+  def new_actor(actor: ActorRef) = {
+    println("System has created a new actor: " + actor.path.name)
+    seenActors += actor
+  }
+  
+  
+  def trace_finished() = {
+    println("Done executing the trace.")
+  }
+  
+  
+  def reply_prefix(prefix: dispacthersT) = {
+  }
+  
   
   
   def beginMessageReceive(cell: ActorCell) {
@@ -41,11 +62,11 @@ class Instrumenter {
   
   def schedule_new_message() : Unit = {
     
-    active.headOption match {
+    pendingEvents.headOption match {
       case Some((receiver, queue)) =>
         
         if (queue.isEmpty == true) {
-          active.remove(receiver) match {
+          pendingEvents.remove(receiver) match {
             case Some(key) => "Removed the last element in the queue..."
             case None => throw new Exception("internal error")
           }
@@ -55,7 +76,7 @@ class Instrumenter {
           dispatch_new_message(new_cell, envelope)
         }
 
-      case None => println("no more elements")
+      case None => trace_finished()
     }
   }
   
@@ -65,15 +86,16 @@ class Instrumenter {
     val src = envelope.sender.path.name
     val dst = cell.self.path.name
     
-    println("scheduling: " + src + " -> " + dst)
-
     val value: (ActorCell, Envelope) = (cell, envelope)
-    allowedMsgs += value
+    finishedEvents.push(value)
+    println("#" + finishedEvents.length + " scheduling: " + src + " -> " + dst)
+
+    allowedEvents += value
     dispatchers.get(cell.self) match {
       case Some(dispatcher) => dispatcher.dispatch(cell, envelope)
       case None => throw new Exception("internal error")
     }
-  }
+  }  
   
   
   
@@ -90,16 +112,17 @@ class Instrumenter {
       return true  
     }
     
-    if (allowedMsgs contains value) {
-      allowedMsgs.remove(value) match {
-        case true => return true
+    if (allowedEvents contains value) {
+      allowedEvents.remove(value) match {
+        case true => 
+          return true
         case false => throw new Exception("internal error")
       }
     }
     
     dispatchers(receiver) = dispatcher
-    val msgs = active.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
-    active(receiver) = msgs += ((cell, envelope))
+    val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
+    pendingEvents(receiver) = msgs += ((cell, envelope))
     println(Console.BLUE + "anqueue: " + src + " -> " + dst + Console.RESET);    
 
     return false
