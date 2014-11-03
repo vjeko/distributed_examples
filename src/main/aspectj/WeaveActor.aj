@@ -8,8 +8,10 @@ import akka.actor.ActorRef;
 import akka.actor.Actor;
 import akka.actor.Props;
 import akka.actor.ActorCell;
-import akka.pattern.AskSupport;
 import akka.actor.ActorSystem;
+
+import akka.pattern.AskSupport;
+
 import akka.dispatch.Envelope;
 import akka.dispatch.MessageQueue;
 import akka.dispatch.MessageDispatcher;
@@ -63,14 +65,14 @@ privileged public aspect WeaveActor {
   after(ActorSystem me, Props props) returning(ActorRef actor):
   execution(ActorRef akka.actor.ActorSystem.actorOf(Props)) &&
   args(props) && this(me) {
-  	inst.new_actor(actor);
+  	inst.new_actor(me, props, actor);
   }
   
   
   after(ActorSystem me, Props props, String name) returning(ActorRef actor):
   execution(ActorRef akka.actor.ActorSystem.actorOf(Props, String)) &&
   args(props, name) && this(me) {
-  	inst.new_actor(actor);
+  	inst.new_actor(me, props, name, actor);
   }
 
 
