@@ -1,8 +1,11 @@
 package akka.dispatch.verification
 
 import akka.actor.ActorCell
+import akka.actor.ActorSystem
 import akka.actor.ActorRef
 import akka.actor.Actor
+import akka.actor.Props;
+
 import akka.dispatch.Envelope
 import akka.dispatch.MessageQueue
 import akka.dispatch.MessageDispatcher
@@ -27,16 +30,53 @@ class Instrumenter {
   val allowedEvents = new allowedT
   val pendingEvents = new pendingEventsT  
   val finishedEvents = new finishedEventsT
-  val seenActors = new HashSet[ActorRef]
+  val seenActors = new HashSet[(ActorSystem, Any)]
   
-  def new_actor(actor: ActorRef) = {
+  var started = false;
+  
+  
+  
+  def new_actor(system: ActorSystem, 
+      props: Props, name: String, actor: ActorRef) = {
+    
     println("System has created a new actor: " + actor.path.name)
-    seenActors += actor
+    seenActors += ((system, (actor, props, name)))
   }
+  
+  def new_actor(system: ActorSystem, 
+      props: Props, actor: ActorRef) = {
+    
+    println("System has created a new actor: " + actor.path.name)
+    seenActors += ((system, (actor, props)))
+    val t = new Tuple3(1, "hello", Console)
+  }
+  
   
   
   def trace_finished() = {
     println("Done executing the trace.")
+    started = false
+    
+    println("Stopping the actors.")
+    for ((system, args) <- seenActors) {
+      args match {
+        case (actor: ActorRef, props: Props, name: String) => 
+          system.stop(actor)
+        case (actor: ActorRef, props: Props) => 
+          system.stop(actor)
+      }
+    }
+
+    println("Starting the actors.")
+    for ((system, args) <- seenActors) {
+      args match {
+        case (actor: ActorRef, props: Props, name: String) => 
+          system.actorOf(props, name)
+        case (actor: ActorRef, props: Props) => 
+          system.actorOf(props)
+      }
+    }
+    
   }
   
   
@@ -52,12 +92,13 @@ class Instrumenter {
   }
   
 
-  def afterMessageReceive(cell: ActorCell) {
+  def afterMessageReceive(cell: ActorCell) {  
     println(Console.RED 
         + " ↑↑↑↑↑↑↑↑↑ " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
         + Console.RESET)
     schedule_new_message()
   }
+  
   
   
   def schedule_new_message() : Unit = {
@@ -76,7 +117,7 @@ class Instrumenter {
           dispatch_new_message(new_cell, envelope)
         }
 
-      case None => trace_finished()
+      case None => if(started) trace_finished()
     }
   }
   
@@ -107,7 +148,7 @@ class Instrumenter {
     val src = envelope.sender.path.name
     val dst = receiver.path.name
     
-    if(src == "deadLetters" | src == "$a") {
+    if(src == "deadLetters" || src == "$a") {
       println("allowing default "  + src + " -> " + dst)
       return true  
     }
@@ -124,7 +165,9 @@ class Instrumenter {
     val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
     pendingEvents(receiver) = msgs += ((cell, envelope))
     println(Console.BLUE + "anqueue: " + src + " -> " + dst + Console.RESET);    
+    
 
+    
     return false
   }
 
