@@ -4,6 +4,7 @@ import akka.actor.ActorCell
 import akka.actor.ActorSystem
 import akka.actor.ActorRef
 import akka.actor.Actor
+import akka.actor.PoisonPill
 import akka.actor.Props;
 
 import akka.dispatch.Envelope
@@ -15,7 +16,7 @@ import scala.collection.mutable.Queue
 import scala.collection.mutable.Stack
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
-
+import scala.util.control.Breaks
 
 class Instrumenter {
   
@@ -23,14 +24,17 @@ class Instrumenter {
   type pendingEventsT = HashMap[ActorRef, Queue[(ActorCell, Envelope)]]
   type dispacthersT = HashMap[ActorRef, MessageDispatcher]
   
-  type finishedEventsT = Stack[(ActorCell, Envelope)]
+  type finishedEventsT = Queue[(ActorCell, Envelope)]
 
   val dispatchers = new dispacthersT
   
   val allowedEvents = new allowedT
   val pendingEvents = new pendingEventsT  
   val finishedEvents = new finishedEventsT
+  
   val seenActors = new HashSet[(ActorSystem, Any)]
+  val actorNames = new HashSet[String]
+  var counter = 0   
   
   var started = false;
   
@@ -41,6 +45,7 @@ class Instrumenter {
     
     println("System has created a new actor: " + actor.path.name)
     seenActors += ((system, (actor, props, name)))
+    actorNames += name
   }
   
   def new_actor(system: ActorSystem, 
@@ -52,31 +57,49 @@ class Instrumenter {
   }
   
   
+  def new_syatem() {
+    
+    println("Starting the actors.")
+    val newSystem = ActorSystem("new-system-" + counter)
+    counter += 1
+
+    val newSeenActors = seenActors.clone()
+    seenActors.clear()
+    
+    for ((systemx, args) <- newSeenActors) {
+      args match {
+        case (actor: ActorRef, props: Props, name: String) =>
+          println("starting " + name)
+          newSystem.actorOf(props, name)
+      }
+    }
+    
+    val (cell, envelope) = finishedEvents.dequeue()
+    finishedEvents.clear()
+    dispatchers(cell.self) = newSystem.dispatchers.defaultGlobalDispatcher
+    dispatch_new_message(cell, envelope)
+  }
+  
+  
   
   def trace_finished() = {
     println("Done executing the trace.")
     started = false
     
-    println("Stopping the actors.")
-    for ((system, args) <- seenActors) {
-      args match {
-        case (actor: ActorRef, props: Props, name: String) => 
-          system.stop(actor)
-        case (actor: ActorRef, props: Props) => 
-          system.stop(actor)
+    val loop = new Breaks;
+    loop.breakable {
+      
+          
+      println("Stopping the actors.")
+      for ((system, args) <- seenActors) {
+        system.shutdown()
+        system.registerOnTermination(new_syatem())
+        loop.break
       }
+      
     }
 
-    println("Starting the actors.")
-    for ((system, args) <- seenActors) {
-      args match {
-        case (actor: ActorRef, props: Props, name: String) => 
-          system.actorOf(props, name)
-        case (actor: ActorRef, props: Props) => 
-          system.actorOf(props)
-      }
-    }
-    
+
   }
   
   
@@ -86,13 +109,17 @@ class Instrumenter {
   
   
   def beginMessageReceive(cell: ActorCell) {
+    
+    println("beginMessageReceive")
+    if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     println(Console.GREEN 
         + " ↓↓↓↓↓↓↓↓↓ " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
         Console.RESET)
   }
   
 
-  def afterMessageReceive(cell: ActorCell) {  
+  def afterMessageReceive(cell: ActorCell) {
+    if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     println(Console.RED 
         + " ↑↑↑↑↑↑↑↑↑ " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
         + Console.RESET)
@@ -117,7 +144,8 @@ class Instrumenter {
           dispatch_new_message(new_cell, envelope)
         }
 
-      case None => if(started) trace_finished()
+      case None => 
+        if(started && counter < 4) trace_finished()
     }
   }
   
@@ -128,7 +156,7 @@ class Instrumenter {
     val dst = cell.self.path.name
     
     val value: (ActorCell, Envelope) = (cell, envelope)
-    finishedEvents.push(value)
+    finishedEvents.enqueue(value)
     println("#" + finishedEvents.length + " scheduling: " + src + " -> " + dst)
 
     allowedEvents += value
@@ -139,6 +167,15 @@ class Instrumenter {
   }  
   
   
+  def isSystemMessage(src: String, dst: String): Boolean = {
+
+    if ((actorNames contains src) ||
+        (actorNames contains dst)
+    ) return false
+    
+    return true
+  }
+  
   
   def aroundDispatch(dispatcher: MessageDispatcher, cell: ActorCell, 
       envelope: Envelope): Boolean = {
@@ -148,10 +185,7 @@ class Instrumenter {
     val src = envelope.sender.path.name
     val dst = receiver.path.name
     
-    if(src == "deadLetters" || src == "$a") {
-      println("allowing default "  + src + " -> " + dst)
-      return true  
-    }
+    if (isSystemMessage(src, dst)) { return true }
     
     if (allowedEvents contains value) {
       allowedEvents.remove(value) match {
@@ -162,11 +196,15 @@ class Instrumenter {
     }
     
     dispatchers(receiver) = dispatcher
+    if (!started) {
+      started = true
+      dispatch_new_message(cell, envelope)
+      return false
+    }
+    
     val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
     pendingEvents(receiver) = msgs += ((cell, envelope))
     println(Console.BLUE + "anqueue: " + src + " -> " + dst + Console.RESET);    
-    
-
     
     return false
   }
