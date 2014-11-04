@@ -18,7 +18,7 @@ class FireStarter(_system: ActorSystem) extends Actor {
   }
 
   def start() = {
-    val system = _system;
+    val system = context.system;
 
     val ids = List.range(0, 5);
     val startFun = (i: Int) =>

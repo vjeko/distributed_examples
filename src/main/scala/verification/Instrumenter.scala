@@ -19,41 +19,40 @@ import scala.collection.mutable.HashSet
 import scala.util.control.Breaks
 
 class Instrumenter {
-  
-  type allowedT = HashSet[(ActorCell, Envelope)]
-  type pendingEventsT = HashMap[ActorRef, Queue[(ActorCell, Envelope)]]
-  type dispacthersT = HashMap[ActorRef, MessageDispatcher]
-  
-  type finishedEventsT = Queue[(ActorCell, Envelope)]
 
-  val dispatchers = new dispacthersT
+  val dispatchers = new HashMap[ActorRef, MessageDispatcher]
   
-  val allowedEvents = new allowedT
-  val pendingEvents = new pendingEventsT  
-  val finishedEvents = new finishedEventsT
+  val allowedEvents = new HashSet[(ActorCell, Envelope)]
+  val pendingEvents = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]  
+  val finishedEvents = new Queue[(String, String, Any, ActorCell, Envelope)]
   
   val seenActors = new HashSet[(ActorSystem, Any)]
+  val actorMappings = new HashMap[String, ActorRef]
   val actorNames = new HashSet[String]
+  
   var counter = 0   
-  
   var started = false;
-  
   
   
   def new_actor(system: ActorSystem, 
       props: Props, name: String, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
-    seenActors += ((system, (actor, props, name)))
-    actorNames += name
+    if (!started) {
+      seenActors += ((system, (actor, props, name)))
+    }
+    actorMappings(name) = actor
+    actorNames += name  
+
   }
   
   def new_actor(system: ActorSystem, 
       props: Props, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
-    seenActors += ((system, (actor, props)))
-    val t = new Tuple3(1, "hello", Console)
+    if (started) {
+      seenActors += ((system, (actor, props)))
+    }
   }
   
   
@@ -74,10 +73,20 @@ class Instrumenter {
       }
     }
     
-    val (cell, envelope) = finishedEvents.dequeue()
+    val (rcv, snd, msg, cell, envelope) = finishedEvents.dequeue()
+    
     finishedEvents.clear()
-    dispatchers(cell.self) = newSystem.dispatchers.defaultGlobalDispatcher
-    dispatch_new_message(cell, envelope)
+    actorMappings.get(rcv) match {
+      
+      case Some(ref) =>
+        ref ! msg
+        println("Found it!")
+        //dispatchers(cell.self) = newSystem.dispatchers.defaultGlobalDispatcher
+        //dispatch_new_message(cell, envelope)
+      case None => throw new Exception("internal error")
+    }
+    
+
   }
   
   
@@ -88,7 +97,6 @@ class Instrumenter {
     
     val loop = new Breaks;
     loop.breakable {
-      
           
       println("Stopping the actors.")
       for ((system, args) <- seenActors) {
@@ -98,14 +106,8 @@ class Instrumenter {
       }
       
     }
-
-
+    
   }
-  
-  
-  def reply_prefix(prefix: dispacthersT) = {
-  }
-  
   
   
   def beginMessageReceive(cell: ActorCell) {
@@ -132,7 +134,6 @@ class Instrumenter {
     
     pendingEvents.headOption match {
       case Some((receiver, queue)) =>
-        
         if (queue.isEmpty == true) {
           pendingEvents.remove(receiver) match {
             case Some(key) => "Removed the last element in the queue..."
@@ -152,14 +153,15 @@ class Instrumenter {
   
 
   def dispatch_new_message(cell: ActorCell, envelope: Envelope) = {
-    val src = envelope.sender.path.name
-    val dst = cell.self.path.name
+    val snd = envelope.sender.path.name
+    val rcv = cell.self.path.name
     
-    val value: (ActorCell, Envelope) = (cell, envelope)
-    finishedEvents.enqueue(value)
-    println("#" + finishedEvents.length + " scheduling: " + src + " -> " + dst)
+    allowedEvents += ((cell, envelope) : (ActorCell, Envelope))
+    finishedEvents.enqueue( 
+        ((rcv, snd, envelope.message, cell, envelope) 
+            :(String, String, Any, ActorCell, Envelope)) )
+    println("#" + finishedEvents.length + " scheduling: " + snd + " -> " + rcv)
 
-    allowedEvents += value
     dispatchers.get(cell.self) match {
       case Some(dispatcher) => dispatcher.dispatch(cell, envelope)
       case None => throw new Exception("internal error")
