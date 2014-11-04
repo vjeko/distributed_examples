@@ -8,11 +8,11 @@ import akka.actor.Props
 
 
 object Main extends App {
-  
+
   val system = ActorSystem("Broadcast")
   val fireStarter = system.actorOf(
-      Props(new FireStarter(system)),
+      Props(new FireStarter()),
       name="firestarter")
   fireStarter ! 0
-  
+
 }

@@ -77,6 +77,7 @@ class HackyFailureDetector(nodes: List[ActorRef]) extends FailureDetector {
     otherNodes.map(n => n ! SuspectedFailure(node))
   }
 
+<<<<<<< HEAD
   // TODO(cs): support recovery. Upon recovering a node, send SuspectedRecovery messages to all links.
 }
 
@@ -84,6 +85,10 @@ class HackyFailureDetector(nodes: List[ActorRef]) extends FailureDetector {
 object PerfectLink {
   private val timerMillis = 500
 }
+=======
+  def start() = {
+    val system = context.system;
+>>>>>>> a075c803aac0cd43ab2b7e7fcf3ee35bdcd14d01
 
 /**
  * PerfectLink. Attached to Nodes.
@@ -289,13 +294,13 @@ class BroadcastNode(id: Int) extends Actor {
   }
 }
 
-class FireStarter(_system: ActorSystem, numNodes:Int = 4) extends Actor {
+class FireStarter(numNodes:Int = 4) extends Actor {
   def receive = {
     case _ => start()
   }
 
   def start() = {
-    val system = _system;
+    val system = context.system;
 
     val nodes = List.range(0, numNodes).map(i =>
       system.actorOf(Props(classOf[BroadcastNode], i), name="node" + i))
