@@ -49,8 +49,7 @@ class Instrumenter {
   val scheduler = new Scheduler(this)
   val dispatchers = new HashMap[ActorRef, MessageDispatcher]
   
-  val allowedEvents = new HashSet[(ActorCell, Envelope)]
-  val pendingEvents = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]  
+  val allowedEvents = new HashSet[(ActorCell, Envelope)]  
   
   val seenActors = new HashSet[(ActorSystem, Any)]
   val actorMappings = new HashMap[String, ActorRef]
@@ -218,9 +217,6 @@ class Instrumenter {
       dispatch_new_message(cell, envelope)
       return false
     }
-    
-    val msgs = scheduler.pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
-    scheduler.pendingEvents(receiver) = msgs += ((cell, envelope))
     
     scheduler.event_produced(cell, envelope)
     

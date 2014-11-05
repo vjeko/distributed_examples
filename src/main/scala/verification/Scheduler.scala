@@ -70,6 +70,9 @@ class Scheduler(_instrumenter : Instrumenter) {
     val snd = envelope.sender.path.name
     val rcv = receiver.path.name
     
+    val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
+    pendingEvents(receiver) = msgs += ((cell, envelope))
+    
     currentlyProduced.enqueue(new MsgEvent(rcv, snd, envelope.message, cell, envelope))
   }
   
