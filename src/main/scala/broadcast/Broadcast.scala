@@ -321,12 +321,14 @@ class FireStarter(numNodes:Int = 4) extends Actor {
     // nodes(0) ! RBBroadcast(DataMessage("Message3"))
 
     // Wait for execution to terminate.
-    implicit val timeout = Timeout(2 seconds)
-    while (fd.liveNodes.map(
-           n => Await.result(n.ask(StillActiveQuery), 500 milliseconds).
-                asInstanceOf[Boolean]).reduceLeft(_ | _)) {
-      Thread sleep 500
-    }
-    system.shutdown()
+    // TODO(cs): uncomment when we figure out how to play nicely with model
+    // checker.
+    // implicit val timeout = Timeout(2 seconds)
+    // while (fd.liveNodes.map(
+    //        n => Await.result(n.ask(StillActiveQuery), 500 milliseconds).
+    //             asInstanceOf[Boolean]).reduceLeft(_ | _)) {
+    //   Thread sleep 500
+    // }
+    // system.shutdown()
   }
 }
