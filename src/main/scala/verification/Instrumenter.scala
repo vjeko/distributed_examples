@@ -18,6 +18,29 @@ import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 import scala.util.control.Breaks
 
+class Event
+
+class MsgEvent(_sender: String, _receiver: String, _msg: Any, 
+               _cell: ActorCell, _envelope: Envelope) extends Event {
+  
+  val sender = _sender
+  val receiver = _receiver
+  val msg = _msg
+  val cell = _cell
+  val envelope = _envelope
+}
+
+
+class SpawnEvent(_parent: String,
+    _props: Props, _name: String, _actor: ActorRef) extends Event {
+  
+  val parent = _parent
+  val props = _props
+  val name = _name
+  val actor = _actor
+}
+
+
 class Instrumenter {
 
   val dispatchers = new HashMap[ActorRef, MessageDispatcher]
@@ -26,10 +49,21 @@ class Instrumenter {
   val pendingEvents = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]  
   val finishedEvents = new Queue[(String, String, Any, ActorCell, Envelope)]
   
+  type messageT = (String, String, Any, ActorCell, Envelope)
+  type CurrentTimeQueueT = Queue[Event]
+  
+  val currentlyProduced = new CurrentTimeQueueT
+  val currentlyConsumed = new CurrentTimeQueueT
+  
+  val producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  val consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  
   val seenActors = new HashSet[(ActorSystem, Any)]
   val actorMappings = new HashMap[String, ActorRef]
   val actorNames = new HashSet[String]
   
+  var currentActor = ""
+  var currentTime = 0
   var counter = 0   
   var started = false;
   
@@ -38,12 +72,13 @@ class Instrumenter {
       props: Props, name: String, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
+    currentlyProduced.enqueue(new SpawnEvent(currentActor, props, name, actor))
+    
     if (!started) {
       seenActors += ((system, (actor, props, name)))
     }
     actorMappings(name) = actor
-    actorNames += name  
-
+    actorNames += name
   }
   
   def new_actor(system: ActorSystem, 
@@ -76,6 +111,7 @@ class Instrumenter {
     val (rcv, snd, msg, cell, envelope) = finishedEvents.dequeue()
     
     finishedEvents.clear()
+    producedEvents.clear()
     actorMappings.get(rcv) match {
       
       case Some(ref) =>
@@ -94,6 +130,7 @@ class Instrumenter {
   def trace_finished() = {
     println("Done executing the trace.")
     started = false
+    currentTime = 0
     
     val loop = new Breaks;
     loop.breakable {
@@ -112,10 +149,12 @@ class Instrumenter {
   
   def beginMessageReceive(cell: ActorCell) {
     
-    println("beginMessageReceive")
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
+
+    currentActor = cell.self.path.name
+    
     println(Console.GREEN 
-        + " ↓↓↓↓↓↓↓↓↓ " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
+        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
         Console.RESET)
   }
   
@@ -123,8 +162,17 @@ class Instrumenter {
   def afterMessageReceive(cell: ActorCell) {
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     println(Console.RED 
-        + " ↑↑↑↑↑↑↑↑↑ " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
+        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
         + Console.RESET)
+    
+    producedEvents.enqueue( (currentTime, currentlyProduced.clone()) )
+    consumedEvents.enqueue( (currentTime, currentlyConsumed.clone()) )
+    println("Produced: " + currentlyProduced.size + " Consumed: " + currentlyConsumed.size)
+    
+    currentlyProduced.clear()
+    currentlyConsumed.clear()
+    
+    currentTime += 1
     schedule_new_message()
   }
   
@@ -133,6 +181,7 @@ class Instrumenter {
   def schedule_new_message() : Unit = {
     
     pendingEvents.headOption match {
+      
       case Some((receiver, queue)) =>
         if (queue.isEmpty == true) {
           pendingEvents.remove(receiver) match {
@@ -156,14 +205,16 @@ class Instrumenter {
     val snd = envelope.sender.path.name
     val rcv = cell.self.path.name
     
-    allowedEvents += ((cell, envelope) : (ActorCell, Envelope))
+    allowedEvents += ((cell, envelope) : (ActorCell, Envelope))        
     finishedEvents.enqueue( 
         ((rcv, snd, envelope.message, cell, envelope) 
             :(String, String, Any, ActorCell, Envelope)) )
     println("#" + finishedEvents.length + " scheduling: " + snd + " -> " + rcv)
 
     dispatchers.get(cell.self) match {
-      case Some(dispatcher) => dispatcher.dispatch(cell, envelope)
+      case Some(dispatcher) => 
+        currentlyConsumed.enqueue(new MsgEvent(rcv, snd, envelope.message, cell, envelope))
+        dispatcher.dispatch(cell, envelope)
       case None => throw new Exception("internal error")
     }
   }  
@@ -184,10 +235,10 @@ class Instrumenter {
     
     val value: (ActorCell, Envelope) = (cell, envelope)
     val receiver = cell.self
-    val src = envelope.sender.path.name
-    val dst = receiver.path.name
+    val snd = envelope.sender.path.name
+    val rcv = receiver.path.name
     
-    if (isSystemMessage(src, dst)) { return true }
+    if (isSystemMessage(snd, rcv)) { return true }
     
     if (allowedEvents contains value) {
       allowedEvents.remove(value) match {
@@ -206,8 +257,10 @@ class Instrumenter {
     
     val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
     pendingEvents(receiver) = msgs += ((cell, envelope))
-    println(Console.BLUE + "anqueue: " + src + " -> " + dst + Console.RESET);    
-    
+    currentlyProduced.enqueue(new MsgEvent(rcv, snd, envelope.message, cell, envelope))
+
+    println(Console.BLUE + "enqueue: " + snd + " -> " + rcv + Console.RESET);
+
     return false
   }
 
