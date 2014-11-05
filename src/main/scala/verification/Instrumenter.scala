@@ -91,16 +91,13 @@ class Instrumenter {
   }
   
   
-  def new_syatem() {
+  def restart_system(sys: ActorSystem, argQueue: Queue[Any]) {
     
-    println("Starting the actors.")
     val newSystem = ActorSystem("new-system-" + counter)
     counter += 1
+    println("Started a new actor system.")
 
-    val newSeenActors = seenActors.clone()
-    seenActors.clear()
-    
-    for ((systemx, args) <- newSeenActors) {
+    for (args <- argQueue) {
       args match {
         case (actor: ActorRef, props: Props, name: String) =>
           println("starting " + name)
@@ -108,21 +105,28 @@ class Instrumenter {
       }
     }
     
-    val (rcv, snd, msg, cell, envelope) = finishedEvents.dequeue()
+    val (epoch, firstTick) = consumedEvents.headOption match {
+      case Some(elem) => elem 
+      case None => throw new Exception("no previously consumed events")
+    }
     
-    finishedEvents.clear()
+    val firstEvent = firstTick.headOption match {
+      case Some(elem : MsgEvent) => elem 
+      case _ => throw new Exception("first event not a message")
+    }
+    
     producedEvents.clear()
-    actorMappings.get(rcv) match {
-      
+    consumedEvents.clear()
+    
+    actorMappings.get(firstEvent.sender) match {
+
       case Some(ref) =>
-        ref ! msg
+        ref ! firstEvent.msg
         println("Found it!")
         //dispatchers(cell.self) = newSystem.dispatchers.defaultGlobalDispatcher
         //dispatch_new_message(cell, envelope)
-      case None => throw new Exception("internal error")
+      case None => throw new Exception("no such actor " + firstEvent.receiver)
     }
-    
-
   }
   
   
@@ -131,17 +135,19 @@ class Instrumenter {
     println("Done executing the trace.")
     started = false
     currentTime = 0
-    
-    val loop = new Breaks;
-    loop.breakable {
-          
-      println("Stopping the actors.")
-      for ((system, args) <- seenActors) {
+        
+    val allSystems = new HashMap[ActorSystem, Queue[Any]]
+    for ((system, args) <- seenActors) {
+      val argQueue = allSystems.getOrElse(system, new Queue[Any])
+      argQueue.enqueue(args)
+      allSystems(system) = argQueue
+    }
+
+    seenActors.clear()
+    for ((system, argQueue) <- allSystems) {
+        println("Shutting down the actor system. " + argQueue.size)
         system.shutdown()
-        system.registerOnTermination(new_syatem())
-        loop.break
-      }
-      
+        system.registerOnTermination(restart_system(system, argQueue))
     }
     
   }
@@ -206,10 +212,8 @@ class Instrumenter {
     val rcv = cell.self.path.name
     
     allowedEvents += ((cell, envelope) : (ActorCell, Envelope))        
-    finishedEvents.enqueue( 
-        ((rcv, snd, envelope.message, cell, envelope) 
-            :(String, String, Any, ActorCell, Envelope)) )
-    println("#" + finishedEvents.length + " scheduling: " + snd + " -> " + rcv)
+
+    println(" scheduling: " + snd + " -> " + rcv)
 
     dispatchers.get(cell.self) match {
       case Some(dispatcher) => 
