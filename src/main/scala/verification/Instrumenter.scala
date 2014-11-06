@@ -41,29 +41,21 @@ class SpawnEvent(_parent: String,
 }
 
 
+
+
+
 class Instrumenter {
 
+  val scheduler = new Scheduler(this)
   val dispatchers = new HashMap[ActorRef, MessageDispatcher]
   
-  val allowedEvents = new HashSet[(ActorCell, Envelope)]
-  val pendingEvents = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]  
-  val finishedEvents = new Queue[(String, String, Any, ActorCell, Envelope)]
-  
-  type messageT = (String, String, Any, ActorCell, Envelope)
-  type CurrentTimeQueueT = Queue[Event]
-  
-  val currentlyProduced = new CurrentTimeQueueT
-  val currentlyConsumed = new CurrentTimeQueueT
-  
-  val producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  val consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  val allowedEvents = new HashSet[(ActorCell, Envelope)]  
   
   val seenActors = new HashSet[(ActorSystem, Any)]
   val actorMappings = new HashMap[String, ActorRef]
   val actorNames = new HashSet[String]
   
   var currentActor = ""
-  var currentTime = 0
   var counter = 0   
   var started = false;
   
@@ -72,7 +64,8 @@ class Instrumenter {
       props: Props, name: String, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
-    currentlyProduced.enqueue(new SpawnEvent(currentActor, props, name, actor))
+    //currentlyProduced.enqueue(new SpawnEvent(currentActor, props, name, actor))
+    scheduler.event_produced(currentActor, props, name, actor)
     
     if (!started) {
       seenActors += ((system, (actor, props, name)))
@@ -91,6 +84,7 @@ class Instrumenter {
   }
   
   
+  
   def restart_system(sys: ActorSystem, argQueue: Queue[Any]) {
     
     val newSystem = ActorSystem("new-system-" + counter)
@@ -105,27 +99,11 @@ class Instrumenter {
       }
     }
     
-    val (epoch, firstTick) = consumedEvents.headOption match {
-      case Some(elem) => elem 
-      case None => throw new Exception("no previously consumed events")
-    }
+    val first_event = scheduler.start_trace()
     
-    val firstEvent = firstTick.headOption match {
-      case Some(elem : MsgEvent) => elem 
-      case _ => throw new Exception("first event not a message")
-    }
-    
-    producedEvents.clear()
-    consumedEvents.clear()
-    
-    actorMappings.get(firstEvent.sender) match {
-
-      case Some(ref) =>
-        ref ! firstEvent.msg
-        println("Found it!")
-        //dispatchers(cell.self) = newSystem.dispatchers.defaultGlobalDispatcher
-        //dispatch_new_message(cell, envelope)
-      case None => throw new Exception("no such actor " + firstEvent.receiver)
+    actorMappings.get(first_event.sender) match {
+      case Some(ref) => ref ! first_event.msg
+      case None => throw new Exception("no such actor " + first_event.receiver)
     }
   }
   
@@ -134,8 +112,8 @@ class Instrumenter {
   def trace_finished() = {
     println("Done executing the trace.")
     started = false
-    currentTime = 0
-        
+    scheduler.trace_finished()
+    
     val allSystems = new HashMap[ActorSystem, Queue[Any]]
     for ((system, args) <- seenActors) {
       val argQueue = allSystems.getOrElse(system, new Queue[Any])
@@ -149,7 +127,6 @@ class Instrumenter {
         system.shutdown()
         system.registerOnTermination(restart_system(system, argQueue))
     }
-    
   }
   
   
@@ -160,7 +137,7 @@ class Instrumenter {
     currentActor = cell.self.path.name
     
     println(Console.GREEN 
-        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
+        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
         Console.RESET)
   }
   
@@ -168,42 +145,21 @@ class Instrumenter {
   def afterMessageReceive(cell: ActorCell) {
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     println(Console.RED 
-        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
+        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
         + Console.RESET)
-    
-    producedEvents.enqueue( (currentTime, currentlyProduced.clone()) )
-    consumedEvents.enqueue( (currentTime, currentlyConsumed.clone()) )
-    println("Produced: " + currentlyProduced.size + " Consumed: " + currentlyConsumed.size)
-    
-    currentlyProduced.clear()
-    currentlyConsumed.clear()
-    
-    currentTime += 1
-    schedule_new_message()
-  }
-  
-  
-  
-  def schedule_new_message() : Unit = {
-    
-    pendingEvents.headOption match {
-      
-      case Some((receiver, queue)) =>
-        if (queue.isEmpty == true) {
-          pendingEvents.remove(receiver) match {
-            case Some(key) => "Removed the last element in the queue..."
-            case None => throw new Exception("internal error")
-          }
-          schedule_new_message()
-        } else {
-          val (new_cell, envelope) = queue.dequeue()
-          dispatch_new_message(new_cell, envelope)
-        }
-
-      case None => 
-        if(started && counter < 4) trace_finished()
+        
+    scheduler.after_receive(cell)          
+    scheduler.schedule_new_message() match {
+      case Some((new_cell, envelope)) => dispatch_new_message(new_cell, envelope)
+      case None =>
+        counter += 1
+        if (counter < 4) trace_finished()
+        else println("Done.")
     }
   }
+  
+  
+  
   
   
 
@@ -215,13 +171,15 @@ class Instrumenter {
 
     println(" scheduling: " + snd + " -> " + rcv)
 
-    dispatchers.get(cell.self) match {
-      case Some(dispatcher) => 
-        currentlyConsumed.enqueue(new MsgEvent(rcv, snd, envelope.message, cell, envelope))
-        dispatcher.dispatch(cell, envelope)
+    val dispatcher = dispatchers.get(cell.self) match {
+      case Some(value) => value
       case None => throw new Exception("internal error")
     }
-  }  
+    
+    scheduler.event_consumed(cell, envelope)
+    dispatcher.dispatch(cell, envelope)
+  }
+  
   
   
   def isSystemMessage(src: String, dst: String): Boolean = {
@@ -232,6 +190,7 @@ class Instrumenter {
     
     return true
   }
+  
   
   
   def aroundDispatch(dispatcher: MessageDispatcher, cell: ActorCell, 
@@ -259,10 +218,8 @@ class Instrumenter {
       return false
     }
     
-    val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
-    pendingEvents(receiver) = msgs += ((cell, envelope))
-    currentlyProduced.enqueue(new MsgEvent(rcv, snd, envelope.message, cell, envelope))
-
+    scheduler.event_produced(cell, envelope)
+    
     println(Console.BLUE + "enqueue: " + snd + " -> " + rcv + Console.RESET);
 
     return false
