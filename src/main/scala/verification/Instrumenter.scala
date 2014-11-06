@@ -64,12 +64,12 @@ class Instrumenter {
       props: Props, name: String, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
-    //currentlyProduced.enqueue(new SpawnEvent(currentActor, props, name, actor))
     scheduler.event_produced(currentActor, props, name, actor)
     
     if (!started) {
       seenActors += ((system, (actor, props, name)))
     }
+    
     actorMappings(name) = actor
     actorNames += name
   }
@@ -78,6 +78,8 @@ class Instrumenter {
       props: Props, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
+    scheduler.event_produced(currentActor, props, actor.path.name, actor)
+
     if (started) {
       seenActors += ((system, (actor, props)))
     }
@@ -130,10 +132,11 @@ class Instrumenter {
   }
   
   
-  def beginMessageReceive(cell: ActorCell) {
+  def beforeMessageReceive(cell: ActorCell) {
     
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
 
+    scheduler.before_receive(cell)
     currentActor = cell.self.path.name
     
     println(Console.GREEN 
@@ -145,7 +148,7 @@ class Instrumenter {
   def afterMessageReceive(cell: ActorCell) {
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     println(Console.RED 
-        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
+        + " ↑↑↑↑↑↑↑↑↑ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
         + Console.RESET)
         
     scheduler.after_receive(cell)          
