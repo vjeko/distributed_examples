@@ -26,30 +26,86 @@ class Scheduler(_instrumenter : Instrumenter) {
   val currentlyProduced = new CurrentTimeQueueT
   val currentlyConsumed = new CurrentTimeQueueT
   
-  val producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  val consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  var producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  var consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  
+  var prevProducedEvents : Queue[ (Integer, CurrentTimeQueueT) ] = null
+  var prevConsumedEvents : Queue[ (Integer, CurrentTimeQueueT) ] = null
   
   val pendingEvents = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]  
+  
+  def get_next_message(queue_old: Queue[Event],
+                       queue_new: Queue[(ActorCell, Envelope)]) : Unit = {
+    
+    val head = queue_new.headOption match {
+      case Some((a, b)) => a
+      case None => throw new Exception("internal error")
+    }
+    
+    println(head.self.path.name)
+    
+    var p = ""
+    
+    for(event <- queue_old) {
+      event match {
+        case e : MsgEvent => 
+          p += " " + e.receiver
+          if (e.receiver == head.self.path.name) println(true)
+        case _ => 
+      }
+    }
+    
+    println(p)
+    
+  }
   
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
     
     pendingEvents.headOption match {
       
-     case Some((receiver, queue)) =>
-        if (queue.isEmpty == true) {
-          pendingEvents.remove(receiver) match {
-            case Some(key) => schedule_new_message()
-            case None => throw new Exception("internal error")
-          }
-          
-        } else {
-          val (new_cell, envelope) = queue.dequeue()
-          return Some((new_cell, envelope))
-        }
+      case Some((receiver, queue)) =>
+         if (queue.isEmpty == true) {
+           pendingEvents.remove(receiver) match {
+             case Some(key) =>
+                
+               if (prevConsumedEvents != null) {
+                 println("DEQUEUE " + prevConsumedEvents.size)
+                 if (!prevConsumedEvents.isEmpty) prevConsumedEvents.dequeue()
+               }
+                 
+                 
+               schedule_new_message()
+             case None => throw new Exception("internal error")
+           }
+           
+         } else {
 
+           if (prevConsumedEvents != null) {
+             
+             
+             prevConsumedEvents.headOption match {
+               case Some((clock, qq)) =>
+                println(clock + " " + qq.size)
+                if (!prevConsumedEvents.isEmpty) prevConsumedEvents.dequeue()
+                get_next_message(qq, queue)
+                case None =>
+             }
+             
+           }
+           val (new_cell, envelope) = queue.dequeue()
+           return Some((new_cell, envelope))
+
+         }
+      
       case None => return None
     }
   }
+  
+  def event_consumed(event: Event) = {
+    currentlyConsumed.enqueue(event)
+  }
+  
+  
   
   def event_consumed(cell: ActorCell, envelope: Envelope) = {
     val value: (ActorCell, Envelope) = (cell, envelope)
@@ -61,6 +117,10 @@ class Scheduler(_instrumenter : Instrumenter) {
   }
   
   
+  
+  def event_produced(event: Event) = {
+    currentlyProduced.enqueue(event)
+  }
   
   def event_produced(cell: ActorCell, envelope: Envelope) = {
     val value: (ActorCell, Envelope) = (cell, envelope)
@@ -85,9 +145,7 @@ class Scheduler(_instrumenter : Instrumenter) {
     
     producedEvents.enqueue( (currentTime, currentlyProduced.clone()) )
     consumedEvents.enqueue( (currentTime, currentlyConsumed.clone()) )
-    
-    println("Produced: " + currentlyProduced.size + " Consumed: " + currentlyConsumed.size)
-    
+        
     currentlyProduced.clear()
     currentlyConsumed.clear()
     
@@ -102,23 +160,30 @@ class Scheduler(_instrumenter : Instrumenter) {
     currentTime = 0
   }
   
-  def start_trace() : MsgEvent = {
-
-    val (epoch, firstTick) = consumedEvents.headOption match {
+  def next_event() : Event = {
+    
+    val (epoch, firstTick) = prevConsumedEvents.headOption match {
       case Some(elem) => elem 
       case _ => throw new Exception("no previously consumed events")
       
     }
     
-    val firstEvent = firstTick.headOption match {
-      case Some(elem : MsgEvent) => elem 
-      case _ => throw new Exception("first event not a message")
+    val firstEvent = firstTick.isEmpty match {
+      case false => firstTick.dequeue()
+      case true => throw new Exception("first event not a message")
     }
     
-    producedEvents.clear()
-    consumedEvents.clear()
-    
     return firstEvent
+  }
+  
+  
+  def start_trace() : Unit = {
+
+    prevConsumedEvents = consumedEvents
+    prevProducedEvents = producedEvents
+    
+    producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+    consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
     
   }
 
