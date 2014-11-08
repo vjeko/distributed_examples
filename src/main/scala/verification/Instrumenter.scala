@@ -121,7 +121,7 @@ class Instrumenter {
       case _ => throw new Exception("not a message")
     }
     
-    actorMappings.get(first_msg.sender) match {
+    actorMappings.get(first_msg.receiver) match {
       case Some(ref) => ref ! first_msg.msg
       case None => throw new Exception("no such actor " + first_msg.receiver)
     }

@@ -15,11 +15,13 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.Queue
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
+import scala.collection.Iterator
 
 class Scheduler(_instrumenter : Instrumenter) {
   
   var intrumenter = _instrumenter 
   var currentTime = 0
+  var index = 0
   
   type CurrentTimeQueueT = Queue[Event]
   
@@ -29,71 +31,71 @@ class Scheduler(_instrumenter : Instrumenter) {
   var producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   var consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   
-  var prevProducedEvents : Queue[ (Integer, CurrentTimeQueueT) ] = null
-  var prevConsumedEvents : Queue[ (Integer, CurrentTimeQueueT) ] = null
+  var prevProducedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  var prevConsumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   
   val pendingEvents = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]  
   
-  def get_next_message(queue_old: Queue[Event],
-                       queue_new: Queue[(ActorCell, Envelope)]) : Unit = {
-    
-    val head = queue_new.headOption match {
-      case Some((a, b)) => a
-      case None => throw new Exception("internal error")
-    }
-    
-    println(head.self.path.name)
-    
-    var p = ""
-    
-    for(event <- queue_old) {
-      event match {
-        case e : MsgEvent => 
-          p += " " + e.receiver
-          if (e.receiver == head.self.path.name) println(true)
-        case _ => 
+  
+  
+  def get_next_message(queue_new: Queue[(ActorCell, Envelope)]) : Option[MsgEvent] = {
+
+    def get_message() : Option[MsgEvent] = { 
+      seq() match {
+        case Some(v : MsgEvent) => 
+          println("MSgEvent")
+          Some(v)
+        case Some(v : Event) => 
+          println("Event")
+          get_message()
+        case None => None
       }
     }
+   
+    return get_message()
     
-    println(p)
     
   }
   
+  
+  
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
     
+    
+    def extract(e: MsgEvent, c: (ActorCell, Envelope)) : Boolean = {
+      val (cell, env) = c
+      println (e.receiver + " == " + cell.self.path.name)
+      e.receiver == cell.self.path
+    }
+
     pendingEvents.headOption match {
       
       case Some((receiver, queue)) =>
          if (queue.isEmpty == true) {
+           
            pendingEvents.remove(receiver) match {
-             case Some(key) =>
-                
-               if (prevConsumedEvents != null) {
-                 println("DEQUEUE " + prevConsumedEvents.size)
-                 if (!prevConsumedEvents.isEmpty) prevConsumedEvents.dequeue()
-               }
-                 
-                 
-               schedule_new_message()
+             case Some(key) => schedule_new_message()
              case None => throw new Exception("internal error")
            }
            
          } else {
 
-           if (prevConsumedEvents != null) {
-             
-             
-             prevConsumedEvents.headOption match {
-               case Some((clock, qq)) =>
-                println(clock + " " + qq.size)
-                if (!prevConsumedEvents.isEmpty) prevConsumedEvents.dequeue()
-                get_next_message(qq, queue)
-                case None =>
-             }
-             
+           val maybe = get_next_message(queue) match {
+             case Some(msg_event) => 
+               println(queue.size)
+               queue.dequeueFirst(extract(msg_event, _))
+             case None => None
            }
-           val (new_cell, envelope) = queue.dequeue()
-           return Some((new_cell, envelope))
+
+           maybe match {
+             case Some(xxx) =>
+               println("some")
+               return maybe
+             case None => 
+               val (new_cell, envelope) = queue.dequeue() 
+               println("Is -> " + new_cell.self.path.name)
+               return Some((new_cell, envelope))
+           }
 
          }
       
@@ -106,6 +108,27 @@ class Scheduler(_instrumenter : Instrumenter) {
   }
   
   
+  def seq() : Option[Event] = {
+    
+    println(prevConsumedEvents.size)
+    if(prevConsumedEvents.isEmpty)
+      return None
+      
+    val (count, q) = prevConsumedEvents.head
+    q.isEmpty match {
+      case true =>
+        println("q is empty")
+        prevConsumedEvents.dequeue()
+        seq()
+      case false =>
+        println("q is not empty")
+        val ret = Some(q.dequeue())
+        return ret
+    }
+    
+
+  }
+  
   
   def event_consumed(cell: ActorCell, envelope: Envelope) = {
     val value: (ActorCell, Envelope) = (cell, envelope)
@@ -113,7 +136,7 @@ class Scheduler(_instrumenter : Instrumenter) {
     val snd = envelope.sender.path.name
     val rcv = receiver.path.name
     
-    currentlyConsumed.enqueue(new MsgEvent(rcv, snd, envelope.message, cell, envelope))
+    currentlyConsumed.enqueue(new MsgEvent(snd, rcv, envelope.message, cell, envelope))
   }
   
   
@@ -131,7 +154,7 @@ class Scheduler(_instrumenter : Instrumenter) {
     val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
     pendingEvents(receiver) = msgs += ((cell, envelope))
     
-    currentlyProduced.enqueue(new MsgEvent(rcv, snd, envelope.message, cell, envelope))
+    currentlyProduced.enqueue(new MsgEvent(snd, rcv, envelope.message, cell, envelope))
   }
   
   
@@ -158,22 +181,16 @@ class Scheduler(_instrumenter : Instrumenter) {
   
   def trace_finished() = {
     currentTime = 0
+
   }
   
   def next_event() : Event = {
     
-    val (epoch, firstTick) = prevConsumedEvents.headOption match {
-      case Some(elem) => elem 
-      case _ => throw new Exception("no previously consumed events")
-      
+    seq() match {
+      case Some(v) => v
+      case None => throw new Exception("no previously consumed events")
     }
     
-    val firstEvent = firstTick.isEmpty match {
-      case false => firstTick.dequeue()
-      case true => throw new Exception("first event not a message")
-    }
-    
-    return firstEvent
   }
   
   
@@ -185,6 +202,7 @@ class Scheduler(_instrumenter : Instrumenter) {
     producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
     consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
     
+    prevConsumedEvents.iterator
   }
 
 }
