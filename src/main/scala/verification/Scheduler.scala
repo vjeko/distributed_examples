@@ -34,20 +34,16 @@ class Scheduler(_instrumenter : Instrumenter) {
   var prevProducedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   var prevConsumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   
-  val pendingEvents = new HashMap[ActorRef, Queue[(ActorCell, Envelope)]]  
+  val pendingEvents = new HashMap[String, Queue[(ActorCell, Envelope)]]  
   
   
   
-  def get_next_message(queue_new: Queue[(ActorCell, Envelope)]) : Option[MsgEvent] = {
+  def get_next_message() : Option[MsgEvent] = {
 
     def get_message() : Option[MsgEvent] = { 
       seq() match {
-        case Some(v : MsgEvent) => 
-          println("MSgEvent")
-          Some(v)
-        case Some(v : Event) => 
-          println("Event")
-          get_message()
+        case Some(v : MsgEvent) =>  Some(v)
+        case Some(v : Event) => get_message()
         case None => None
       }
     }
@@ -64,43 +60,41 @@ class Scheduler(_instrumenter : Instrumenter) {
     
     def extract(e: MsgEvent, c: (ActorCell, Envelope)) : Boolean = {
       val (cell, env) = c
-      println (e.receiver + " == " + cell.self.path.name)
-      e.receiver == cell.self.path
+      e.receiver == cell.self.path.name
     }
-
-    pendingEvents.headOption match {
+  
+    def get_start_event()  : Option[(ActorCell, Envelope)] = {
       
-      case Some((receiver, queue)) =>
-         if (queue.isEmpty == true) {
-           
-           pendingEvents.remove(receiver) match {
-             case Some(key) => schedule_new_message()
-             case None => throw new Exception("internal error")
+      pendingEvents.headOption match {
+        
+        case Some((receiver, queue)) =>
+           if (queue.isEmpty == true) {
+             
+             pendingEvents.remove(receiver) match {
+               case Some(key) => schedule_new_message()
+               case None => throw new Exception("internal error")
+             }
+             
+           } else {
+              Some(queue.dequeue())
            }
-           
-         } else {
-
-           val maybe = get_next_message(queue) match {
-             case Some(msg_event) => 
-               println(queue.size)
-               queue.dequeueFirst(extract(msg_event, _))
-             case None => None
-           }
-
-           maybe match {
-             case Some(xxx) =>
-               println("some")
-               return maybe
-             case None => 
-               val (new_cell, envelope) = queue.dequeue() 
-               println("Is -> " + new_cell.self.path.name)
-               return Some((new_cell, envelope))
-           }
-
-         }
-      
-      case None => return None
+        case None => None
+      }
     }
+    
+   val maybe = get_next_message() match {
+     case Some(msg_event : MsgEvent) => 
+
+       pendingEvents.get(msg_event.receiver) match {
+         case Some(queue) => queue.dequeueFirst(extract(msg_event, _))
+         case None => None
+       }
+       
+     case None => get_start_event()
+       
+   }
+   
+   return maybe
   }
   
   def event_consumed(event: Event) = {
@@ -110,18 +104,15 @@ class Scheduler(_instrumenter : Instrumenter) {
   
   def seq() : Option[Event] = {
     
-    println(prevConsumedEvents.size)
     if(prevConsumedEvents.isEmpty)
       return None
       
     val (count, q) = prevConsumedEvents.head
     q.isEmpty match {
       case true =>
-        println("q is empty")
         prevConsumedEvents.dequeue()
         seq()
       case false =>
-        println("q is not empty")
         val ret = Some(q.dequeue())
         return ret
     }
@@ -151,8 +142,8 @@ class Scheduler(_instrumenter : Instrumenter) {
     val snd = envelope.sender.path.name
     val rcv = receiver.path.name
     
-    val msgs = pendingEvents.getOrElse(receiver, new Queue[(ActorCell, Envelope)])
-    pendingEvents(receiver) = msgs += ((cell, envelope))
+    val msgs = pendingEvents.getOrElse(rcv, new Queue[(ActorCell, Envelope)])
+    pendingEvents(rcv) = msgs += ((cell, envelope))
     
     currentlyProduced.enqueue(new MsgEvent(snd, rcv, envelope.message, cell, envelope))
   }
