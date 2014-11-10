@@ -64,12 +64,15 @@ class Instrumenter {
       props: Props, name: String, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
-    //currentlyProduced.enqueue(new SpawnEvent(currentActor, props, name, actor))
-    scheduler.event_produced(currentActor, props, name, actor)
+    
+    val event = new SpawnEvent(currentActor, props, name, actor)
+    scheduler.event_produced(event)
+    scheduler.event_consumed(event)
     
     if (!started) {
       seenActors += ((system, (actor, props, name)))
     }
+    
     actorMappings(name) = actor
     actorNames += name
   }
@@ -78,6 +81,11 @@ class Instrumenter {
       props: Props, actor: ActorRef) = {
     
     println("System has created a new actor: " + actor.path.name)
+    
+    val event = new SpawnEvent(currentActor, props, actor.path.name, actor)
+    scheduler.event_produced(event)
+    scheduler.event_consumed(event)
+
     if (started) {
       seenActors += ((system, (actor, props)))
     }
@@ -91,19 +99,31 @@ class Instrumenter {
     counter += 1
     println("Started a new actor system.")
 
-    for (args <- argQueue) {
-      args match {
-        case (actor: ActorRef, props: Props, name: String) =>
-          println("starting " + name)
-          newSystem.actorOf(props, name)
-      }
+    scheduler.start_trace()
+    
+    val first_spawn = scheduler.next_event() match {
+      case e: SpawnEvent => e
+      case _ => throw new Exception("not a spawn")
     }
     
-    val first_event = scheduler.start_trace()
     
-    actorMappings.get(first_event.sender) match {
-      case Some(ref) => ref ! first_event.msg
-      case None => throw new Exception("no such actor " + first_event.receiver)
+    for (args <- argQueue) {
+      args match {
+        case (actor: ActorRef, props: Props, first_spawn.name) =>
+          println("starting " + first_spawn.name)
+          newSystem.actorOf(props, first_spawn.name)
+      }
+    }
+
+    
+    val first_msg = scheduler.next_event() match {
+      case e: MsgEvent => e
+      case _ => throw new Exception("not a message")
+    }
+    
+    actorMappings.get(first_msg.receiver) match {
+      case Some(ref) => ref ! first_msg.msg
+      case None => throw new Exception("no such actor " + first_msg.receiver)
     }
   }
   
@@ -130,10 +150,11 @@ class Instrumenter {
   }
   
   
-  def beginMessageReceive(cell: ActorCell) {
+  def beforeMessageReceive(cell: ActorCell) {
     
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
 
+    scheduler.before_receive(cell)
     currentActor = cell.self.path.name
     
     println(Console.GREEN 
@@ -145,7 +166,7 @@ class Instrumenter {
   def afterMessageReceive(cell: ActorCell) {
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     println(Console.RED 
-        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
+        + " ↑↑↑↑↑↑↑↑↑ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
         + Console.RESET)
         
     scheduler.after_receive(cell)          
@@ -168,8 +189,6 @@ class Instrumenter {
     val rcv = cell.self.path.name
     
     allowedEvents += ((cell, envelope) : (ActorCell, Envelope))        
-
-    println(" scheduling: " + snd + " -> " + rcv)
 
     val dispatcher = dispatchers.get(cell.self) match {
       case Some(value) => value
