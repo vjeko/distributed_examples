@@ -8,7 +8,7 @@ import akka.dispatch.verification._
 
 
 object Main extends App {
-  Instrumenter().scheduler = new akka.dispatch.verification.Scheduler
+  Instrumenter().scheduler = new akka.dispatch.verification.BasicScheduler
  
   val system = ActorSystem("Broadcast")
   val fireStarter = system.actorOf(
