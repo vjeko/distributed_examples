@@ -18,35 +18,17 @@ import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 import scala.util.control.Breaks
 
-class Event
+abstract class Event
 
-class MsgEvent(_sender: String, _receiver: String, _msg: Any, 
-               _cell: ActorCell, _envelope: Envelope) extends Event {
-  
-  val sender = _sender
-  val receiver = _receiver
-  val msg = _msg
-  val cell = _cell
-  val envelope = _envelope
-}
+case class MsgEvent(sender: String, receiver: String, msg: Any, 
+               cell: ActorCell, envelope: Envelope) extends Event
 
-
-class SpawnEvent(_parent: String,
-    _props: Props, _name: String, _actor: ActorRef) extends Event {
-  
-  val parent = _parent
-  val props = _props
-  val name = _name
-  val actor = _actor
-}
-
-
-
-
+case class SpawnEvent(parent: String,
+    props: Props, name: String, actor: ActorRef) extends Event
 
 class Instrumenter {
 
-  val scheduler = new Scheduler(this)
+  val scheduler = new Scheduler
   val dispatchers = new HashMap[ActorRef, MessageDispatcher]
   
   val allowedEvents = new HashSet[(ActorCell, Envelope)]  
@@ -55,11 +37,12 @@ class Instrumenter {
   val actorMappings = new HashMap[String, ActorRef]
   val actorNames = new HashSet[String]
   
+  // Track the executing context (i.e., source of events)
   var currentActor = ""
   var counter = 0   
   var started = false;
   
-  
+  // Callbacks for new actors being created
   def new_actor(system: ActorSystem, 
       props: Props, name: String, actor: ActorRef) = {
     
@@ -92,21 +75,34 @@ class Instrumenter {
   }
   
   
-  
-  def restart_system(sys: ActorSystem, argQueue: Queue[Any]) {
+  // Restart the system:
+  //  - Create a new actor system
+  //  - Inform the scheduler that things have been reset
+  //  - Run the first event to start the first actor
+  //  - Send the first message received by this actor.
+  //  This is all assuming that we don't control replay of main
+  //  so this is a way to replay the first message that started it all.
+  def reinitialize_system(sys: ActorSystem, argQueue: Queue[Any]) {
     
     val newSystem = ActorSystem("new-system-" + counter)
     counter += 1
     println("Started a new actor system.")
 
+    // Tell scheduler that we are done restarting and it should prepare
+    // to start the system
+    // TODO: This should probably take sys as an argument or something
     scheduler.start_trace()
     
+    // We expect the first event to be an actor spawn (not actors exist, nothing
+    // to run).
     val first_spawn = scheduler.next_event() match {
       case e: SpawnEvent => e
       case _ => throw new Exception("not a spawn")
     }
     
-    
+    // Start the actor using a new actor system. (All subsequent actors
+    // are expected to spawn from here, so they will automatically inherit
+    // the new actor system)
     for (args <- argQueue) {
       args match {
         case (actor: ActorRef, props: Props, first_spawn.name) =>
@@ -115,7 +111,9 @@ class Instrumenter {
       }
     }
 
-    
+    // TODO: Maybe we should do this differently (the same way we inject external
+    // events, etc.)
+    // Kick off the system by replaying a message
     val first_msg = scheduler.next_event() match {
       case e: MsgEvent => e
       case _ => throw new Exception("not a message")
@@ -127,12 +125,10 @@ class Instrumenter {
     }
   }
   
-  
-  
-  def trace_finished() = {
-    println("Done executing the trace.")
+  // Signal to the instrumenter that the scheduler wants to restart the system
+  def restart_system() = {
+    println("Restarting system")
     started = false
-    scheduler.trace_finished()
     
     val allSystems = new HashMap[ActorSystem, Queue[Any]]
     for ((system, args) <- seenActors) {
@@ -145,11 +141,11 @@ class Instrumenter {
     for ((system, argQueue) <- allSystems) {
         println("Shutting down the actor system. " + argQueue.size)
         system.shutdown()
-        system.registerOnTermination(restart_system(system, argQueue))
+        system.registerOnTermination(reinitialize_system(system, argQueue))
     }
   }
   
-  
+  // Called before a message is received
   def beforeMessageReceive(cell: ActorCell) {
     
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
@@ -162,7 +158,7 @@ class Instrumenter {
         Console.RESET)
   }
   
-
+  // Called after the message receive is done.
   def afterMessageReceive(cell: ActorCell) {
     if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     println(Console.RED 
@@ -174,16 +170,13 @@ class Instrumenter {
       case Some((new_cell, envelope)) => dispatch_new_message(new_cell, envelope)
       case None =>
         counter += 1
-        if (counter < 4) trace_finished()
-        else println("Done.")
+        println("Nothing to run.")
+        started = false
+        //scheduler.notify_quiscence()
     }
   }
-  
-  
-  
-  
-  
 
+  // Dispatch a message, i.e., deliver it to the intended recipient
   def dispatch_new_message(cell: ActorCell, envelope: Envelope) = {
     val snd = envelope.sender.path.name
     val rcv = cell.self.path.name
@@ -200,7 +193,7 @@ class Instrumenter {
   }
   
   
-  
+  // Is this message a system message
   def isSystemMessage(src: String, dst: String): Boolean = {
 
     if ((actorNames contains src) ||
@@ -211,7 +204,7 @@ class Instrumenter {
   }
   
   
-  
+  // Called when dispatch is called.
   def aroundDispatch(dispatcher: MessageDispatcher, cell: ActorCell, 
       envelope: Envelope): Boolean = {
     
@@ -220,8 +213,12 @@ class Instrumenter {
     val snd = envelope.sender.path.name
     val rcv = receiver.path.name
     
+    // If this is a system message just let it through.
     if (isSystemMessage(snd, rcv)) { return true }
     
+    // If this is not a system message then check if we have already recorded
+    // this event. Recorded => we are injecting this event (as opposed to some 
+    // actor doing it in which case we need to report it)
     if (allowedEvents contains value) {
       allowedEvents.remove(value) match {
         case true => 
@@ -230,13 +227,18 @@ class Instrumenter {
       }
     }
     
+    // Record the dispatcher for the current receiver.
     dispatchers(receiver) = dispatcher
+
+    // Have we started dispatching messages (i.e., is the loop in after_message_receive
+    // running?). If not then dispatch the current message and start the loop.
     if (!started) {
       started = true
       dispatch_new_message(cell, envelope)
       return false
     }
     
+    // Record that this event was produced
     scheduler.event_produced(cell, envelope)
     
     println(Console.BLUE + "enqueue: " + snd + " -> " + rcv + Console.RESET);
@@ -246,3 +248,12 @@ class Instrumenter {
 
 }
 
+object Instrumenter {
+  var obj:Instrumenter = null
+  def apply() = {
+    if (obj == null) {
+      obj = new Instrumenter
+    }
+    obj
+  }
+}
