@@ -22,142 +22,27 @@ import scala.collection.generic.GenericTraversableTemplate
 // A basic scheduler
 class NullScheduler extends Scheduler {
   
-  var intrumenter = Instrumenter
   var currentTime = 0
-  var index = 0
   
-  type CurrentTimeQueueT = Queue[Event]
-  
-  var currentlyProduced = new CurrentTimeQueueT
-  var currentlyConsumed = new CurrentTimeQueueT
-  
-  var producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  var consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  
-  var prevProducedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  var prevConsumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
- 
-  // Current set of enabled events.
-  val pendingEvents = new HashMap[String, Queue[(ActorCell, Envelope)]]  
-
-  // Notification that the system has been reset
-  def start_trace() : Unit = {
-    prevProducedEvents = producedEvents
-    prevConsumedEvents = consumedEvents
-    producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-    consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  def isSystemMessage(src: String, dst: String): Boolean = {
+    return true
   }
   
+  def start_trace() : Unit = {}
   
-
-  // Get next message event from the trace.
-  private[this] def get_next_trace_message() : Option[MsgEvent] = {
-    None
-  }
-  
-  
-  
-  // Figure out what is the next message to schedule.
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
-  
-    // Filter for messages belong to a particular actor.
-    def is_the_same(e: MsgEvent, c: (ActorCell, Envelope)) : Boolean = {
-      val (cell, env) = c
-      e.receiver == cell.self.path.name
-    }
-
-    // Get from the current set of pending events.
-    def get_pending_event()  : Option[(ActorCell, Envelope)] = {
-      // Do we have some pending events
-      pendingEvents.headOption match {
-        case Some((receiver, queue)) =>
-           if (queue.isEmpty == true) {
-             
-             pendingEvents.remove(receiver) match {
-               case Some(key) => schedule_new_message()
-               case None => throw new Exception("internal error")
-             }
-             
-           } else {
-              Some(queue.dequeue())
-           }
-        case None => None
-      }
-    }
-    
-    get_next_trace_message() match {
-     // The trace says there is something to run.
-     case Some(msg_event : MsgEvent) => 
-       pendingEvents.get(msg_event.receiver) match {
-         case Some(queue) => queue.dequeueFirst(is_the_same(msg_event, _))
-         case None => None
-       }
-     // The trace says there is nothing to run so we have either exhausted our
-     // trace or are running for the first time. Use any enabled transitions.
-     case None => get_pending_event()
-       
-   }
+    return None
   }
   
-  
-  // Get next event
   def next_event() : Event = {
     throw new Exception("no previously consumed events")
   }
   
-
-  // Record that an event was consumed
-  def event_consumed(event: Event) = {
-    currentlyConsumed.enqueue(event)
-  }
-  
-  
-  def event_consumed(cell: ActorCell, envelope: Envelope) = {
-    currentlyConsumed.enqueue(new MsgEvent(
-        envelope.sender.path.name, cell.self.path.name, 
-        envelope.message, cell, envelope))
-  }
-  
-  
-  // Record that an event was produced 
-  def event_produced(event: Event) = {
-    currentlyProduced.enqueue(event)
-  }
-  
-  
-  def event_produced(cell: ActorCell, envelope: Envelope) = {
-    val snd = envelope.sender.path.name
-    val rcv = cell.self.path.name
-    val msgs = pendingEvents.getOrElse(rcv, new Queue[(ActorCell, Envelope)])
-    
-    pendingEvents(rcv) = msgs += ((cell, envelope))
-    currentlyProduced.enqueue(new MsgEvent(snd, rcv, envelope.message, cell, envelope))
-  }
-  
-  
-  def event_produced(_parent: String,
-    _props: Props, _name: String, _actor: ActorRef) = {
-    currentlyProduced.enqueue(new SpawnEvent(_parent, _props, _name, _actor))
-  }
-  
-  
-  // Called before we start processing a newly received event
-  def before_receive(cell: ActorCell) {
-    producedEvents.enqueue( (currentTime, currentlyProduced) )
-    consumedEvents.enqueue( (currentTime, currentlyConsumed) )
-    currentlyProduced = new CurrentTimeQueueT
-    currentlyConsumed = new CurrentTimeQueueT
-    currentTime += 1
-  }
-  
-  
-  // Called after receive is done being processed 
-  def after_receive(cell: ActorCell) {
-  }
-  
-
-  def notify_quiescence () {
-  }
-  
-
+  def event_consumed(event: Event) = {}
+  def event_consumed(cell: ActorCell, envelope: Envelope) = {}
+  def event_produced(event: Event) = {}
+  def event_produced(cell: ActorCell, envelope: Envelope) = {}
+  def before_receive(cell: ActorCell) {}
+  def after_receive(cell: ActorCell) {}
+  def notify_quiescence () {}
 }

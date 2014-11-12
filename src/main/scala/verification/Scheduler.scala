@@ -8,6 +8,10 @@ import akka.dispatch.Envelope
 
 // The interface for schedulers
 trait Scheduler {
+  
+  // Is this message a system message
+  def isSystemMessage(src: String, dst: String): Boolean
+  
   var currentTime : Int
   // Notification that the system has been reset
   def start_trace() : Unit
@@ -24,7 +28,6 @@ trait Scheduler {
   // Record that an event was produced 
   def event_produced(event: Event) : Unit
   def event_produced(cell: ActorCell, envelope: Envelope) : Unit
-  def event_produced(parent: String, props: Props, name: String, actor: ActorRef) : Unit
   // Record that an event was consumed
   def event_consumed(event: Event) : Unit  
   def event_consumed(cell: ActorCell, envelope: Envelope)

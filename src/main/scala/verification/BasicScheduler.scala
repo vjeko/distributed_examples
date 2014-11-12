@@ -40,6 +40,18 @@ class BasicScheduler extends Scheduler {
   // Current set of enabled events.
   val pendingEvents = new HashMap[String, Queue[(ActorCell, Envelope)]]  
 
+  val actorNames = new HashSet[String]
+  
+  
+  // Is this message a system message
+  def isSystemMessage(src: String, dst: String): Boolean = {
+    if ((actorNames contains src) || (actorNames contains dst))
+      return false
+    
+    return true
+  }
+  
+  
   // Notification that the system has been reset
   def start_trace() : Unit = {
     prevProducedEvents = producedEvents
@@ -47,7 +59,6 @@ class BasicScheduler extends Scheduler {
     producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
     consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   }
-  
   
   
   // When executing a trace, find the next trace event.
@@ -142,9 +153,16 @@ class BasicScheduler extends Scheduler {
         envelope.message, cell, envelope))
   }
   
+  // Record that an event was produced 
+  def event_produced2(event: SpawnEvent) = {
+    currentlyProduced.enqueue(event)
+  }
   
   // Record that an event was produced 
   def event_produced(event: Event) = {
+    event match {
+      case event : SpawnEvent => actorNames += event.name
+    }
     currentlyProduced.enqueue(event)
   }
   
@@ -156,12 +174,6 @@ class BasicScheduler extends Scheduler {
     
     pendingEvents(rcv) = msgs += ((cell, envelope))
     currentlyProduced.enqueue(new MsgEvent(snd, rcv, envelope.message, cell, envelope))
-  }
-  
-  
-  def event_produced(_parent: String,
-    _props: Props, _name: String, _actor: ActorRef) = {
-    currentlyProduced.enqueue(new SpawnEvent(_parent, _props, _name, _actor))
   }
   
   

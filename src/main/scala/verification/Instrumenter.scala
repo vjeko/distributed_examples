@@ -28,14 +28,13 @@ case class SpawnEvent(parent: String,
 
 class Instrumenter {
 
-  var scheduler : Scheduler = null
+  var scheduler : Scheduler = new NullScheduler
   val dispatchers = new HashMap[ActorRef, MessageDispatcher]
   
   val allowedEvents = new HashSet[(ActorCell, Envelope)]  
   
   val seenActors = new HashSet[(ActorSystem, Any)]
   val actorMappings = new HashMap[String, ActorRef]
-  val actorNames = new HashSet[String]
   
   // Track the executing context (i.e., source of events)
   var currentActor = ""
@@ -46,18 +45,16 @@ class Instrumenter {
   def new_actor(system: ActorSystem, 
       props: Props, name: String, actor: ActorRef) : Unit = {
     
-    if (scheduler != null) {  
-      val event = new SpawnEvent(currentActor, props, name, actor)
-      scheduler.event_produced(event)
-      scheduler.event_consumed(event)
+    val event = new SpawnEvent(currentActor, props, name, actor)
+    scheduler.event_produced(event : SpawnEvent)
+    scheduler.event_consumed(event)
 
-      if (!started) {
-        seenActors += ((system, (actor, props, name)))
-      }
-      
-      actorMappings(name) = actor
-      actorNames += name
+    if (!started) {
+      seenActors += ((system, (actor, props, name)))
     }
+    
+    actorMappings(name) = actor
+      
     println("System has created a new actor: " + actor.path.name)
   }
   
@@ -119,7 +116,7 @@ class Instrumenter {
   
   // Signal to the instrumenter that the scheduler wants to restart the system
   def restart_system() = {
-    require(scheduler != null)
+    
     println("Restarting system")
     started = false
     
@@ -141,35 +138,34 @@ class Instrumenter {
   // Called before a message is received
   def beforeMessageReceive(cell: ActorCell) {
     
-    if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
-    if (scheduler != null) {
-      scheduler.before_receive(cell)
-      currentActor = cell.self.path.name
-      
-      println(Console.GREEN 
-          + " ↓↓↓↓↓↓↓↓↓ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
-          Console.RESET)
-    }
+    if (scheduler.isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
+   
+    scheduler.before_receive(cell)
+    currentActor = cell.self.path.name
+    
+    println(Console.GREEN 
+        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
+        Console.RESET)
   }
   
   // Called after the message receive is done.
   def afterMessageReceive(cell: ActorCell) {
-    if (isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
-    if (scheduler != null) {
-      println(Console.RED 
-          + " ↑↑↑↑↑↑↑↑↑ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
-          + Console.RESET)
-          
-      scheduler.after_receive(cell)          
-      scheduler.schedule_new_message() match {
-        case Some((new_cell, envelope)) => dispatch_new_message(new_cell, envelope)
-        case None =>
-          counter += 1
-          println("Nothing to run.")
-          started = false
-          scheduler.notify_quiescence()
-      }
+    if (scheduler.isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
+    
+    println(Console.RED 
+        + " ↑↑↑↑↑↑↑↑↑ ⌚  " + scheduler.currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
+        + Console.RESET)
+        
+    scheduler.after_receive(cell)          
+    scheduler.schedule_new_message() match {
+      case Some((new_cell, envelope)) => dispatch_new_message(new_cell, envelope)
+      case None =>
+        counter += 1
+        println("Nothing to run.")
+        started = false
+        scheduler.notify_quiescence()
     }
+
   }
 
   // Dispatch a message, i.e., deliver it to the intended recipient
@@ -189,29 +185,17 @@ class Instrumenter {
   }
   
   
-  // Is this message a system message
-  def isSystemMessage(src: String, dst: String): Boolean = {
-
-    if ((actorNames contains src) ||
-        (actorNames contains dst)
-    ) return false
-    
-    return true
-  }
-  
-  
   // Called when dispatch is called.
   def aroundDispatch(dispatcher: MessageDispatcher, cell: ActorCell, 
       envelope: Envelope): Boolean = {
 
-    if (scheduler == null) { return true }
     val value: (ActorCell, Envelope) = (cell, envelope)
     val receiver = cell.self
     val snd = envelope.sender.path.name
     val rcv = receiver.path.name
     
     // If this is a system message just let it through.
-    if (isSystemMessage(snd, rcv)) { return true }
+    if (scheduler.isSystemMessage(snd, rcv)) { return true }
     
     // If this is not a system message then check if we have already recorded
     // this event. Recorded => we are injecting this event (as opposed to some 
@@ -244,6 +228,9 @@ class Instrumenter {
   }
 
 }
+
+
+
 
 object Instrumenter {
   var obj:Instrumenter = null
