@@ -22,8 +22,6 @@ import scala.collection.generic.GenericTraversableTemplate
 // A basic scheduler
 class NullScheduler extends Scheduler {
   
-  var currentTime = 0
-  
   def isSystemMessage(src: String, dst: String): Boolean = {
     return true
   }

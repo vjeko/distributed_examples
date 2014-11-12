@@ -11,8 +11,6 @@ trait Scheduler {
   
   // Is this message a system message
   def isSystemMessage(src: String, dst: String): Boolean
-  
-  var currentTime : Int
   // Notification that the system has been reset
   def start_trace() : Unit
   // Get the next message to schedule
