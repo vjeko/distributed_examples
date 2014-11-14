@@ -1,13 +1,11 @@
-package sample
-
 import sbt._
 import sbt.Keys._
 import com.typesafe.sbt.SbtAspectj.{ Aspectj, aspectjSettings, useInstrumentedClasses }
 import com.typesafe.sbt.SbtAspectj.AspectjKeys.inputs
 
-object ConcurrencyeBuild extends Build {
-  lazy val concurrency = Project(
-    id = "concurrency",
+object InterpositionBuild extends Build {
+  lazy val interposition = Project(
+    id = "interposition",
     base = file("."),
     settings = Defaults.defaultSettings ++ aspectjSettings ++ Seq(
       organization := "com.typesafe.sbt.aspectj",
