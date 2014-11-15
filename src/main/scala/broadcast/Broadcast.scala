@@ -30,6 +30,7 @@ class FireStarter(_system: ActorSystem) extends Actor {
     nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]))
 
     nodes(0) ! RB_Broadcast(DataMessage(1, "Message"))
+
   }
 }
 /**
