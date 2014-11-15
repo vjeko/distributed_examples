@@ -42,9 +42,14 @@ class DPOR extends Scheduler {
   val actorNames = new HashSet[String]
   
   
+  def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
+    if (sender == null || receiver == null) return true
+    return isSystemMessage(sender.path.name, receiver.path.name)
+  }
+  
   // Is this message a system message
-  def isSystemMessage(src: String, dst: String): Boolean = {
-    if ((actorNames contains src) || (actorNames contains dst))
+  def isSystemMessage(sender: String, receiver: String): Boolean = {
+    if ((actorNames contains sender) || (actorNames contains receiver))
       return false
     
     return true
