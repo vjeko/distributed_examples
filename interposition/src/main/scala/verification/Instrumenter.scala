@@ -19,6 +19,7 @@ import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 import scala.util.control.Breaks
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.Semaphore
 
 abstract class Event
 
@@ -27,6 +28,29 @@ case class MsgEvent(sender: String, receiver: String, msg: Any,
 
 case class SpawnEvent(parent: String,
     props: Props, name: String, actor: ActorRef) extends Event
+
+class TellEnqueueSemaphore extends Semaphore(1) {
+  var enqueue_count = new AtomicInteger
+  var tell_count = new AtomicInteger
+  def tell () {
+    tell_count.incrementAndGet()
+    reducePermits(1)
+    println ("Tell: " + tell_count.get + " | " + enqueue_count.get + " | " + availablePermits())
+  }
+
+  def enqueue () {
+    enqueue_count.incrementAndGet()
+    release() 
+    println ("Tell: " + tell_count.get + " | " + enqueue_count.get + " | " + availablePermits())
+  }
+
+  def await () {
+    println ("Await Tell: " + tell_count.get + " | " + enqueue_count.get + " | " + availablePermits())
+    acquire
+    println ("Tell: " + tell_count.get + " | " + enqueue_count.get + " | " + availablePermits())
+    release
+  }
+}
 
 class Instrumenter {
 
@@ -44,14 +68,11 @@ class Instrumenter {
   var counter = 0   
   var started = false;
   
-  var enqueue_count = new AtomicInteger
-  var tell_count = new AtomicInteger
+  var tellEnqueueAwait = new TellEnqueueSemaphore
   
   def tell(receiver: ActorRef, msg: Any, sender: ActorRef) : Unit = {
     //if (scheduler.isSystemMessage(sender.path.name, receiver.path.name)) return
-    tell_count.incrementAndGet()
-    println ("Tell: " + tell_count + " | " + enqueue_count)
-
+    tellEnqueueAwait.tell
   }
   
   // Callbacks for new actors being created
@@ -133,8 +154,7 @@ class Instrumenter {
     println("Restarting system")
     started = false
     
-    enqueue_count.set(0)
-    tell_count.set(0)
+    tellEnqueueAwait = new TellEnqueueSemaphore
     
     val allSystems = new HashMap[ActorSystem, Queue[Any]]
     for ((system, args) <- seenActors) {
@@ -166,13 +186,7 @@ class Instrumenter {
     if (scheduler.isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
     
     var loop_cnt = 0
-    while (tell_count.get != enqueue_count.get) {
-      loop_cnt += 1
-      if (loop_cnt == 100000) { 
-        println("::: " + tell_count.get + " | " + enqueue_count.get())
-      }
-    }
-    println ("afterMessageReceive: " + tell_count.get  + " | " + enqueue_count.get)
+    tellEnqueueAwait.await()
     
     inActor = false
     currentActor = ""
@@ -236,15 +250,13 @@ class Instrumenter {
     // running?). If not then dispatch the current message and start the loop.
     if (!started) {
       started = true
-      tell_count.set(0)
+      tellEnqueueAwait = new TellEnqueueSemaphore
       dispatch_new_message(cell, envelope)
       return false
     }
     
     scheduler.event_produced(cell, envelope)
-    enqueue_count.incrementAndGet()
-    
-    println(tell_count + " | " + enqueue_count + Console.BLUE +  " Enqueue: " + snd + " -> " + rcv + Console.RESET);
+    tellEnqueueAwait.enqueue()
     
     //require(inActor) 
     // Record that this event was produced
