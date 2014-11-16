@@ -18,17 +18,15 @@ import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 import scala.util.control.Breaks
 
-abstract class Event
 
-case class MsgEvent(sender: String, receiver: String, msg: Any, 
-               cell: ActorCell, envelope: Envelope) extends Event
 
-case class SpawnEvent(parent: String,
-    props: Props, name: String, actor: ActorRef) extends Event
+
 
 class Instrumenter {
 
   var scheduler : Scheduler = new NullScheduler
+  var tellEnqueue : TellEnqueue = new TellEnqueueSemaphore
+  
   val dispatchers = new HashMap[ActorRef, MessageDispatcher]
   
   val allowedEvents = new HashSet[(ActorCell, Envelope)]  
@@ -38,8 +36,16 @@ class Instrumenter {
   
   // Track the executing context (i.e., source of events)
   var currentActor = ""
+  var inActor = false
   var counter = 0   
   var started = false;
+  
+  
+  def tell(receiver: ActorRef, msg: Any, sender: ActorRef) : Unit = {
+    if (!scheduler.isSystemCommunication(sender, receiver))
+      tellEnqueue.tell()
+  }
+  
   
   // Callbacks for new actors being created
   def new_actor(system: ActorSystem, 
@@ -57,6 +63,7 @@ class Instrumenter {
       
     println("System has created a new actor: " + actor.path.name)
   }
+  
   
   def new_actor(system: ActorSystem, 
       props: Props, actor: ActorRef) : Unit = {
@@ -114,11 +121,14 @@ class Instrumenter {
     }
   }
   
+  
   // Signal to the instrumenter that the scheduler wants to restart the system
   def restart_system() = {
     
     println("Restarting system")
+    
     started = false
+    tellEnqueue.reset()
     
     val allSystems = new HashMap[ActorSystem, Queue[Any]]
     for ((system, args) <- seenActors) {
@@ -135,6 +145,7 @@ class Instrumenter {
     }
   }
   
+  
   // Called before a message is received
   def beforeMessageReceive(cell: ActorCell) {
     
@@ -142,12 +153,18 @@ class Instrumenter {
    
     scheduler.before_receive(cell)
     currentActor = cell.self.path.name
+    inActor = true
   }
+  
   
   // Called after the message receive is done.
   def afterMessageReceive(cell: ActorCell) {
     if (scheduler.isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
+
+    tellEnqueue.await()
     
+    inActor = false
+    currentActor = ""
     scheduler.after_receive(cell)          
     scheduler.schedule_new_message() match {
       case Some((new_cell, envelope)) => dispatch_new_message(new_cell, envelope)
@@ -210,11 +227,13 @@ class Instrumenter {
       dispatch_new_message(cell, envelope)
       return false
     }
-    
     // Record that this event was produced
     scheduler.event_produced(cell, envelope)
+    tellEnqueue.enqueue()
+
     
-    println(Console.BLUE + "enqueue: " + snd + " -> " + rcv + Console.RESET);
+    println(Console.BLUE +  "enqueue: " + snd + " -> " + rcv + Console.RESET);
+    require(inActor)
 
     return false
   }

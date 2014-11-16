@@ -4,12 +4,14 @@ import sbt._
 import sbt.Keys._
 import com.typesafe.sbt.SbtAspectj.{ Aspectj, aspectjSettings, useInstrumentedClasses }
 import com.typesafe.sbt.SbtAspectj.AspectjKeys.inputs
+import com.typesafe.sbteclipse.plugin.EclipsePlugin._
 
 object ConcurrencyeBuild extends Build {
   lazy val concurrency = Project(
     id = "concurrency",
     base = file("."),
     settings = Defaults.defaultSettings ++ aspectjSettings ++ Seq(
+      EclipseKeys.withSource := true,
       organization := "com.typesafe.sbt.aspectj",
       version := "0.1",
       scalaVersion := "2.11.2",

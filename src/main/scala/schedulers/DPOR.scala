@@ -22,7 +22,7 @@ import scala.collection.generic.GenericTraversableTemplate
 // A basic scheduler
 class DPOR extends Scheduler {
   
-  var intrumenter = Instrumenter
+  var instrumenter = Instrumenter
   var currentTime = 0
   var index = 0
   
@@ -39,13 +39,17 @@ class DPOR extends Scheduler {
  
   // Current set of enabled events.
   val pendingEvents = new HashMap[String, Queue[(ActorCell, Envelope)]]  
-
   val actorNames = new HashSet[String]
   
   
+  def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
+    if (sender == null || receiver == null) return true
+    return isSystemMessage(sender.path.name, receiver.path.name)
+  }
+  
   // Is this message a system message
-  def isSystemMessage(src: String, dst: String): Boolean = {
-    if ((actorNames contains src) || (actorNames contains dst))
+  def isSystemMessage(sender: String, receiver: String): Boolean = {
+    if ((actorNames contains sender) || (actorNames contains receiver))
       return false
     
     return true
@@ -113,7 +117,9 @@ class DPOR extends Scheduler {
            } else {
               Some(queue.dequeue())
            }
-        case None => None
+        case None =>
+          instrumenter().restart_system()
+          None
       }
     }
     
@@ -195,6 +201,7 @@ class DPOR extends Scheduler {
   
 
   def notify_quiescence () {
+    currentTime = 0
   }
   
 
