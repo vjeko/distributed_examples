@@ -5,8 +5,7 @@ import akka.actor.ActorSystem
 import akka.actor.ActorRef
 import akka.actor.Actor
 import akka.actor.PoisonPill
-import akka.actor.Props;
-
+import akka.actor.Props
 import akka.dispatch.Envelope
 import akka.dispatch.MessageQueue
 import akka.dispatch.MessageDispatcher
@@ -17,7 +16,10 @@ import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 import scala.collection.Iterator
 
-import scala.collection.generic.GenericTraversableTemplate
+import scalax.collection.mutable.Graph 
+import scalax.collection.GraphPredef._, scalax.collection.GraphEdge._
+import scalax.collection.edge.LDiEdge     // labeled directed edge
+import scalax.collection.edge.Implicits._ // shortcuts
 
 // A basic scheduler
 class DPOR extends Scheduler {
@@ -37,10 +39,13 @@ class DPOR extends Scheduler {
   var prevProducedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   var prevConsumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
  
+  var mapping = new HashMap[(ActorCell, Envelope), Event]
+  
   // Current set of enabled events.
   val pendingEvents = new HashMap[String, Queue[(ActorCell, Envelope)]]  
   val actorNames = new HashSet[String]
-  
+ 
+  val g = Graph[(Int, Event), LDiEdge]()
   
   def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
     if (sender == null || receiver == null) return true
@@ -118,23 +123,31 @@ class DPOR extends Scheduler {
               Some(queue.dequeue())
            }
         case None =>
-          instrumenter().restart_system()
+          //instrumenter().restart_system()
           None
       }
     }
+
+    val result = get_next_trace_message() match {
+      // The trace says there is something to run.
+      case Some(msg_event: MsgEvent) =>
+        pendingEvents.get(msg_event.receiver) match {
+          case Some(queue) => queue.dequeueFirst(is_the_same(msg_event, _))
+          case None => None
+        }
+      // The trace says there is nothing to run so we have either exhausted our
+      // trace or are running for the first time. Use any enabled transitions.
+      case None => get_pending_event()
+    }
     
-    get_next_trace_message() match {
-     // The trace says there is something to run.
-     case Some(msg_event : MsgEvent) => 
-       pendingEvents.get(msg_event.receiver) match {
-         case Some(queue) => queue.dequeueFirst(is_the_same(msg_event, _))
-         case None => None
-       }
-     // The trace says there is nothing to run so we have either exhausted our
-     // trace or are running for the first time. Use any enabled transitions.
-     case None => get_pending_event()
-       
-   }
+    result match {
+      case Some((c, e)) =>
+        var ev = MsgEvent(e.sender.path.name, c.self.path.name, e.message)
+        var result = g.find((currentTime, ev))
+        println(result)
+      case _ =>
+    }
+    return result
   }
   
   
@@ -156,11 +169,15 @@ class DPOR extends Scheduler {
   def event_consumed(cell: ActorCell, envelope: Envelope) = {
     currentlyConsumed.enqueue(new MsgEvent(
         envelope.sender.path.name, cell.self.path.name, 
-        envelope.message, cell, envelope))
+        envelope.message))
   }
+  
   
   // Record that an event was produced 
   def event_produced(event: Event) = {
+    g.add((currentTime, event))
+    
+    println("Produced a spawn.")
     event match {
       case event : SpawnEvent => actorNames += event.name
     }
@@ -173,8 +190,13 @@ class DPOR extends Scheduler {
     val rcv = cell.self.path.name
     val msgs = pendingEvents.getOrElse(rcv, new Queue[(ActorCell, Envelope)])
     
+    println("Produced a message.")
+    val event = new MsgEvent(snd, rcv, envelope.message)
+    
     pendingEvents(rcv) = msgs += ((cell, envelope))
-    currentlyProduced.enqueue(new MsgEvent(snd, rcv, envelope.message, cell, envelope))
+    
+    g.add((currentTime, event))
+    currentlyProduced.enqueue(event)
   }
   
   
@@ -202,6 +224,8 @@ class DPOR extends Scheduler {
 
   def notify_quiescence () {
     currentTime = 0
+    
+    println("Total " + consumedEvents.size + " events.")
   }
   
 
