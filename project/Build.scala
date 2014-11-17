@@ -14,12 +14,10 @@ object ConcurrencyeBuild extends Build {
       EclipseKeys.withSource := true,
       organization := "com.typesafe.sbt.aspectj",
       version := "0.1",
-      scalaVersion := "2.11.2",
-
-      //resolvers += "twitter" at "http://maven.twttr.com",
+      scalaVersion := "2.10.4",
 
       libraryDependencies += "com.typesafe.akka" %% "akka-actor" % "2.3.6",
-      libraryDependencies += "com.twitter" % "cassovary_2.10" % "3.2.0",
+      libraryDependencies += "com.twitter" %% "cassovary" % "3.2.0",
       libraryDependencies += "it.unimi.dsi" % "fastutil" % "6.4.4",
 
       // add akka-actor as an aspectj input (find it in the update report)
