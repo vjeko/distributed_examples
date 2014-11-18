@@ -172,6 +172,11 @@ class Instrumenter {
     inActor = false
     currentActor = ""
     scheduler.after_receive(cell)          
+    dispatch_next_message()
+  }
+  
+  
+  def dispatch_next_message() = {
     scheduler.schedule_new_message() match {
       case Some((new_cell, envelope)) => dispatch_new_message(new_cell, envelope)
       case None =>
@@ -180,7 +185,6 @@ class Instrumenter {
         started.set(false)
         scheduler.notify_quiescence()
     }
-
   }
 
   // Dispatch a message, i.e., deliver it to the intended recipient
@@ -225,16 +229,17 @@ class Instrumenter {
     
     // Record the dispatcher for the current receiver.
     dispatchers(receiver) = dispatcher
+    scheduler.event_produced(cell, envelope)
 
     // Have we started dispatching messages (i.e., is the loop in after_message_receive
     // running?). If not then dispatch the current message and start the loop.
     if (!started.get) {
+      println("NEW RUN")
       started.set(true)
-      dispatch_new_message(cell, envelope)
+      dispatch_next_message()
       return false
     }
     // Record that this event was produced
-    scheduler.event_produced(cell, envelope)
     tellEnqueue.enqueue()
 
     
