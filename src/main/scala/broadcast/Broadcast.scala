@@ -22,7 +22,7 @@ class FireStarter(_system: ActorSystem) extends Actor {
 
     val ids = List.range(0, 5);
     val startFun = (i: Int) =>
-      system.actorOf(Props[Node], name = "instrumented-" + i.toString())
+      system.actorOf(Props[Node], name = "I-" + i.toString())
 
     val nodes = ids.map(i => startFun(i))
 

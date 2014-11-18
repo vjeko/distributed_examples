@@ -21,6 +21,7 @@ import scalax.collection.GraphPredef._, scalax.collection.GraphEdge._
 import scalax.collection.edge.LDiEdge     // labeled directed edge
 import scalax.collection.edge.Implicits._ // shortcuts
 
+import java.io.{ PrintWriter, File }
 import scalax.collection.io.dot._
 import scalax.collection.edge.LDiEdge,
        scalax.collection.edge.Implicits._
@@ -147,21 +148,17 @@ class DPOR extends Scheduler {
     }
     
     result match {
-      case Some((ev, c, env)) =>
+      case Some((next_event, c, e)) =>
         
-        g.find(ev) match {
-          case Some(xxxx) =>
-            if(parentEvent != null) {
-              g.addEdge(parentEvent, xxxx)(DiEdge)
-            }
-            parentEvent = ev
+        g.find(next_event) match {
+          case Some(node) => parentEvent = next_event
           case None => 
             
         }
         
 
-        Some((c, env))
-      case _ => None
+        return Some((c, e))
+      case _ => return None
     }
     
     
@@ -192,11 +189,20 @@ class DPOR extends Scheduler {
   
   // Record that an event was produced 
   def event_produced(event: Event) = {
-    g.add(event)
-    
-    println("Produced a spawn.")
+        
     event match {
-      case event : SpawnEvent => actorNames += event.name
+      case event : SpawnEvent =>
+        println("spawn id: ")
+        actorNames += event.name
+      case msg : MsgEvent => 
+        println("enqueue id: " + msg.id)
+
+    }
+    
+    println()
+    g.add(event)
+    if(parentEvent != null) {
+      g.addEdge(event, parentEvent)(DiEdge)
     }
     currentlyProduced.enqueue(event)
   }
@@ -207,12 +213,17 @@ class DPOR extends Scheduler {
     val rcv = cell.self.path.name
     val msgs = pendingEvents.getOrElse(rcv, new Queue[(Event, ActorCell, Envelope)])
     
-    println("Produced a message.")
     val event = new MsgEvent(snd, rcv, envelope.message)
+    
+    println("enqueue id: " + event.id)
+
     
     pendingEvents(rcv) = msgs += ((event, cell, envelope))
     
     g.add(event)
+    if(parentEvent != null) {
+      g.addEdge(event, parentEvent)(DiEdge)
+    }
     currentlyProduced.enqueue(event)
   }
   
@@ -243,29 +254,42 @@ class DPOR extends Scheduler {
         directed = true,
         id = Some("DPOR"))
 
+    def nodeStr(event: Event) : String = {
+      event.value match {
+        case msg : MsgEvent => msg.receiver + " (" + msg.id.toString() + ")" 
+        case spawn : SpawnEvent => spawn.name + " (" + spawn.id.toString() + ")" 
+      }
+    }
+    
+    def nodeTransformer(
+        innerNode: scalax.collection.Graph[Event, DiEdge]#NodeT):
+        Option[(DotGraph, DotNodeStmt)] = {
+      val descr = innerNode.value match {
+        case msg : MsgEvent => DotNodeStmt( nodeStr(msg), Seq.empty[DotAttr])
+        case spawn : SpawnEvent => DotNodeStmt( nodeStr(spawn), Seq(DotAttr("color", "red")))
+      }
+
+      Some(root, descr)
+    }
+    
     def edgeTransformer(
         innerEdge: scalax.collection.Graph[Event, DiEdge]#EdgeT): 
         Option[(DotGraph, DotEdgeStmt)] = {
       
       val edge = innerEdge.edge
 
-      val src = edge.from.value match {
-        case x: MsgEvent => x.id.toString()
-        case y => return None
-      }
-
-      val dst = edge.to.value match {
-        case x: MsgEvent => x.id.toString()
-        case _ => return None
-      }
-      
-      //println (src + " -> " +  dst)
+      val src = nodeStr( edge.from.value )
+      val dst = nodeStr( edge.to.value )
 
       return Some(root, DotEdgeStmt(src, dst, Nil))
     }
     
-    val str = g.toDot(root, edgeTransformer)
+    val str = g.toDot(root, edgeTransformer, cNodeTransformer = Some(nodeTransformer))
+    
     println(str)
+    val pw = new PrintWriter(new File("dot.dot" ))
+    pw.write(str)
+    pw.close
   }
 
   
