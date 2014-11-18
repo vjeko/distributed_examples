@@ -37,7 +37,7 @@ class Instrumenter {
   // Track the executing context (i.e., source of events)
   var currentActor = ""
   var inActor = false
-  var counter = 0   
+  var counter = 0
   var started = false;
   
   

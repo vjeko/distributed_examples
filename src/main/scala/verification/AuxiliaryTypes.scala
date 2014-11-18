@@ -10,13 +10,26 @@ import java.util.concurrent.Semaphore
 
 abstract class Event
 
-case class MsgEvent(sender: String, receiver: String, msg: Any) extends Event
+case class MsgEvent(sender: String, receiver: String, msg: Any, 
+    id: Integer = IDGenerator.get()) extends Event
 
 case class SpawnEvent(parent: String,
-    props: Props, name: String, actor: ActorRef) extends Event
+    props: Props, name: String, actor: ActorRef, 
+    id: Integer = IDGenerator.get()) extends Event
 
 
 
+
+object IDGenerator {
+  var obj:Instrumenter = null
+  var uniqueId = new AtomicInteger
+
+  def get() : Integer = {
+    return uniqueId.incrementAndGet()
+  }
+}
+
+    
 trait TellEnqueue {
   def tell()
   def enqueue()
