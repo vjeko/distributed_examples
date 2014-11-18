@@ -42,6 +42,10 @@ class Instrumenter {
   var started = new AtomicBoolean(false);
  
 
+  def await_enqueue() {
+    tellEnqueue.await()
+  }
+
 
   def tell(receiver: ActorRef, msg: Any, sender: ActorRef) : Unit = {
     if (!scheduler.isSystemCommunication(sender, receiver))
