@@ -21,6 +21,9 @@ import scalax.collection.GraphPredef._, scalax.collection.GraphEdge._
 import scalax.collection.edge.LDiEdge     // labeled directed edge
 import scalax.collection.edge.Implicits._ // shortcuts
 
+import scalax.collection.io.dot._
+import scalax.collection.edge.LDiEdge,
+       scalax.collection.edge.Implicits._
 // A basic scheduler
 class DPOR extends Scheduler {
   
@@ -39,13 +42,16 @@ class DPOR extends Scheduler {
   var prevProducedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   var prevConsumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
  
-  var mapping = new HashMap[(ActorCell, Envelope), Event]
+  var parentEvent : Event = null
   
   // Current set of enabled events.
-  val pendingEvents = new HashMap[String, Queue[(ActorCell, Envelope)]]  
+  val pendingEvents = new HashMap[String, Queue[(Event, ActorCell, Envelope)]]  
   val actorNames = new HashSet[String]
  
-  val g = Graph[(Int, Event), LDiEdge]()
+  
+  val g = Graph[Event, DiEdge]()
+  
+  
   
   def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
     if (sender == null || receiver == null) return true
@@ -102,13 +108,13 @@ class DPOR extends Scheduler {
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
   
     // Filter for messages belong to a particular actor.
-    def is_the_same(e: MsgEvent, c: (ActorCell, Envelope)) : Boolean = {
-      val (cell, env) = c
+    def is_the_same(e: MsgEvent, c: (Event, ActorCell, Envelope)) : Boolean = {
+      val (event, cell, env) = c
       e.receiver == cell.self.path.name
     }
 
     // Get from the current set of pending events.
-    def get_pending_event()  : Option[(ActorCell, Envelope)] = {
+    def get_pending_event()  : Option[(Event, ActorCell, Envelope)] = {
       // Do we have some pending events
       pendingEvents.headOption match {
         case Some((receiver, queue)) =>
@@ -141,13 +147,24 @@ class DPOR extends Scheduler {
     }
     
     result match {
-      case Some((c, e)) =>
-        var ev = MsgEvent(e.sender.path.name, c.self.path.name, e.message)
-        var result = g.find((currentTime, ev))
-        println(result)
-      case _ =>
+      case Some((ev, c, env)) =>
+        
+        g.find(ev) match {
+          case Some(xxxx) =>
+            if(parentEvent != null) {
+              g.addEdge(parentEvent, xxxx)(DiEdge)
+            }
+            parentEvent = ev
+          case None => 
+            
+        }
+        
+
+        Some((c, env))
+      case _ => None
     }
-    return result
+    
+    
   }
   
   
@@ -175,7 +192,7 @@ class DPOR extends Scheduler {
   
   // Record that an event was produced 
   def event_produced(event: Event) = {
-    g.add((currentTime, event))
+    g.add(event)
     
     println("Produced a spawn.")
     event match {
@@ -188,14 +205,14 @@ class DPOR extends Scheduler {
   def event_produced(cell: ActorCell, envelope: Envelope) = {
     val snd = envelope.sender.path.name
     val rcv = cell.self.path.name
-    val msgs = pendingEvents.getOrElse(rcv, new Queue[(ActorCell, Envelope)])
+    val msgs = pendingEvents.getOrElse(rcv, new Queue[(Event, ActorCell, Envelope)])
     
     println("Produced a message.")
     val event = new MsgEvent(snd, rcv, envelope.message)
     
-    pendingEvents(rcv) = msgs += ((cell, envelope))
+    pendingEvents(rcv) = msgs += ((event, cell, envelope))
     
-    g.add((currentTime, event))
+    g.add(event)
     currentlyProduced.enqueue(event)
   }
   
@@ -221,10 +238,42 @@ class DPOR extends Scheduler {
         
   }
   
+  def get_dot() {
+    val root = DotRootGraph(
+        directed = true,
+        id = Some("DPOR"))
 
-  def notify_quiescence () {
-    currentTime = 0
+    def edgeTransformer(
+        innerEdge: scalax.collection.Graph[Event, DiEdge]#EdgeT): 
+        Option[(DotGraph, DotEdgeStmt)] = {
+      
+      val edge = innerEdge.edge
+
+      val src = edge.from.value match {
+        case x: MsgEvent => x.id.toString()
+        case y => return None
+      }
+
+      val dst = edge.to.value match {
+        case x: MsgEvent => x.id.toString()
+        case _ => return None
+      }
+      
+      //println (src + " -> " +  dst)
+
+      return Some(root, DotEdgeStmt(src, dst, Nil))
+    }
     
+    val str = g.toDot(root, edgeTransformer)
+    println(str)
+  }
+
+  
+  
+  def notify_quiescence() {
+    
+    get_dot()
+    currentTime = 0
     println("Total " + consumedEvents.size + " events.")
   }
   

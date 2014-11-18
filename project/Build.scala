@@ -18,6 +18,7 @@ object ConcurrencyeBuild extends Build {
 
       libraryDependencies += "com.typesafe.akka" %% "akka-actor" % "2.3.6",
       libraryDependencies += "com.assembla.scala-incubator" %% "graph-core" % "1.9.0",
+      libraryDependencies += "com.assembla.scala-incubator" %% "graph-dot" % "1.9.0",
 
       // add akka-actor as an aspectj input (find it in the update report)
       inputs in Aspectj <++= update map { report =>
