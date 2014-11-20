@@ -1,30 +1,36 @@
 package akka.dispatch.verification
 
-import akka.actor.ActorCell
-import akka.actor.ActorSystem
-import akka.actor.ActorRef
-import akka.actor.Actor
-import akka.actor.PoisonPill
-import akka.actor.Props
-import akka.dispatch.Envelope
-import akka.dispatch.MessageQueue
-import akka.dispatch.MessageDispatcher
+import akka.actor.ActorCell,
+       akka.actor.ActorSystem,
+       akka.actor.ActorRef,
+       akka.actor.Actor,
+       akka.actor.PoisonPill,
+       akka.actor.Props
 
-import scala.collection.concurrent.TrieMap
-import scala.collection.mutable.Queue
-import scala.collection.mutable.HashMap
-import scala.collection.mutable.HashSet
-import scala.collection.Iterator
+import akka.dispatch.Envelope,
+       akka.dispatch.MessageQueue,
+       akka.dispatch.MessageDispatcher
 
-import scalax.collection.mutable.Graph 
-import scalax.collection.GraphPredef._, scalax.collection.GraphEdge._
-import scalax.collection.edge.LDiEdge     // labeled directed edge
-import scalax.collection.edge.Implicits._ // shortcuts
+import scala.collection.concurrent.TrieMap,
+       scala.collection.mutable.Queue,
+       scala.collection.mutable.HashMap,
+       scala.collection.mutable.HashSet,
+       scala.collection.mutable.ArrayBuffer,
+       scala.collection.mutable.ArraySeq,
+       scala.collection.Iterator
+
+import scalax.collection.mutable.Graph,
+       scalax.collection.GraphPredef._, 
+       scalax.collection.GraphEdge._,
+       scalax.collection.edge.LDiEdge,     // labeled directed edge
+       scalax.collection.edge.Implicits._ // shortcuts
 
 import java.io.{ PrintWriter, File }
-import scalax.collection.io.dot._
+
 import scalax.collection.edge.LDiEdge,
-       scalax.collection.edge.Implicits._
+       scalax.collection.edge.Implicits._,
+       scalax.collection.io.dot._
+       
 // A basic scheduler
 class DPOR extends Scheduler {
   
@@ -37,6 +43,8 @@ class DPOR extends Scheduler {
   var currentlyProduced = new CurrentTimeQueueT
   var currentlyConsumed = new CurrentTimeQueueT
   
+  var pro = new Queue[ Event ]
+  
   var producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   var consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   
@@ -44,6 +52,7 @@ class DPOR extends Scheduler {
   var prevConsumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
  
   var parentEvent : Event = null
+  var trace = new ArrayBuffer[(Event, HashSet[Event])]
   
   // Current set of enabled events.
   val pendingEvents = new HashMap[String, Queue[(Event, ActorCell, Envelope)]]  
@@ -149,14 +158,8 @@ class DPOR extends Scheduler {
     
     result match {
       case Some((next_event, c, e)) =>
-        
-        g.find(next_event) match {
-          case Some(node) => parentEvent = next_event
-          case None => 
-            
-        }
-        
-
+        (g get next_event)
+        parentEvent = next_event
         return Some((c, e))
       case _ => return None
     }
@@ -176,14 +179,15 @@ class DPOR extends Scheduler {
 
   // Record that an event was consumed
   def event_consumed(event: Event) = {
-    currentlyConsumed.enqueue(event)
+    //currentlyConsumed.enqueue(event)
   }
   
   
   def event_consumed(cell: ActorCell, envelope: Envelope) = {
-    currentlyConsumed.enqueue(new MsgEvent(
+    var event = new MsgEvent(
         envelope.sender.path.name, cell.self.path.name, 
-        envelope.message))
+        envelope.message)
+    currentlyConsumed.enqueue(event)
   }
   
   
@@ -191,20 +195,11 @@ class DPOR extends Scheduler {
   def event_produced(event: Event) = {
         
     event match {
-      case event : SpawnEvent =>
-        println("spawn id: ")
-        actorNames += event.name
+      case event : SpawnEvent => actorNames += event.name
       case msg : MsgEvent => 
-        println("enqueue id: " + msg.id)
+    }
+    //currentlyProduced.enqueue(event)
 
-    }
-    
-    println()
-    g.add(event)
-    if(parentEvent != null) {
-      g.addEdge(event, parentEvent)(DiEdge)
-    }
-    currentlyProduced.enqueue(event)
   }
   
   
@@ -215,16 +210,17 @@ class DPOR extends Scheduler {
     
     val event = new MsgEvent(snd, rcv, envelope.message)
     
-    println("enqueue id: " + event.id)
-
-    
     pendingEvents(rcv) = msgs += ((event, cell, envelope))
     
     g.add(event)
+    pro += event
+    
+    currentlyProduced.enqueue(event)
+    
     if(parentEvent != null) {
       g.addEdge(event, parentEvent)(DiEdge)
+      trace += ((event, new HashSet[Event]))
     }
-    currentlyProduced.enqueue(event)
   }
   
   
@@ -232,6 +228,7 @@ class DPOR extends Scheduler {
   def before_receive(cell: ActorCell) {
     producedEvents.enqueue( (currentTime, currentlyProduced) )
     consumedEvents.enqueue( (currentTime, currentlyConsumed) )
+
     currentlyProduced = new CurrentTimeQueueT
     currentlyConsumed = new CurrentTimeQueueT
     currentTime += 1
@@ -296,9 +293,119 @@ class DPOR extends Scheduler {
   
   def notify_quiescence() {
     
+    for((index, queue) <- producedEvents) {
+      
+    }
+    
     get_dot()
     currentTime = 0
-    println("Total " + consumedEvents.size + " events.")
+    
+    println("Total " + trace.size + " events.")
+    dpor()
+    
+  }
+  
+  def getEvent(index: Integer) : MsgEvent = {
+    pro(index) match {
+      case eee : MsgEvent => eee
+      case _ => throw new Exception("internal error not a message")
+    }
+  }
+  
+  
+  
+  
+  def dpor() = {
+    
+    println(g.nodes.size + " " + pro.size)
+    var currentlyEnabeled = new ArraySeq[ List[Event] ](pro.size)
+
+    
+    val root = getEvent(0)
+    println(root.sender + " -> " + root.receiver + " " + root.id)
+    val rootN = ( g get root )
+    
+    
+    def printPath(path : List[g.NodeT]) = {
+      var pathStr = ""
+      for(node <- path) {
+        node.value match {
+          case x : MsgEvent =>
+            pathStr += " (" + x.receiver + " " + x.id + ") "
+          case _ => println("NO!")
+        }
+      }
+      println("path -> " + pathStr)
+    }
+    
+    
+    def analyize_dep(j: Integer, i: Integer) : Unit = {
+      
+      val later = getEvent(i)
+      val earlier = getEvent(j)
+      
+      val earlierN = (g get earlier)
+      val laterN = (g get later)
+      
+      val laterPath = laterN.pathTo( rootN ) match {
+        case Some(path) => path.nodes.toList.reverse
+        case None => throw new Exception("no such path")
+      }
+      
+      val earlierPath = earlierN.pathTo( rootN ) match {
+        case Some(path) => path.nodes.toList.reverse
+        case None => throw new Exception("no such path")
+      }
+      
+      val commonPrefix = laterPath.intersect(earlierPath)
+      val needtoReplay = laterPath.diff(commonPrefix)
+      val lastElement = commonPrefix.last
+      val commonAncestor = pro.indexWhere { e => (e == lastElement.value) }
+
+      //printPath(laterPath)
+      //printPath(earlierPath)
+
+      println("Found a race between " + i + 
+          " and " + j + " with a common index " + commonAncestor)
+      
+      require(commonAncestor > -1 && commonAncestor < j)
+      
+      val values = needtoReplay.map(v => v.value)
+      currentlyEnabeled(i) = values
+      
+
+    }
+    
+    
+      
+    def isCoEnabeled(earlier: MsgEvent, later: MsgEvent) : Boolean = {
+      
+      val earlierN = (g get earlier)
+      val laterN = (g get later)
+      
+      val coEnabeled = laterN.pathTo(earlierN) match {
+        case None => true
+        case _ => false
+      }
+      
+      return coEnabeled
+    }
+    
+
+    
+    for(i <- 0 to pro.size - 1) {
+      val later = getEvent(i)
+
+      for(j <- 0 to i - 1) {
+        val earlier = getEvent(j)
+        
+        if (earlier.receiver == later.receiver &&
+            isCoEnabeled(earlier, later)) {
+          analyize_dep(i, j)
+        }
+      }
+    }
+    
   }
   
 
