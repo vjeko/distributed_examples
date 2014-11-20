@@ -24,7 +24,7 @@ import scalax.collection.mutable.Graph,
        scalax.collection.GraphEdge._,
        scalax.collection.edge.LDiEdge,     // labeled directed edge
        scalax.collection.edge.Implicits._ // shortcuts
-
+       
 import java.io.{ PrintWriter, File }
 
 import scalax.collection.edge.LDiEdge,
@@ -37,6 +37,7 @@ class DPOR extends Scheduler {
   var instrumenter = Instrumenter
   var currentTime = 0
   var index = 0
+  var dep = new HashMap[Event, HashMap[Event, Event]]
   
   type CurrentTimeQueueT = Queue[Event]
   
@@ -203,14 +204,44 @@ class DPOR extends Scheduler {
   }
   
   
-  def event_produced(cell: ActorCell, envelope: Envelope) = {
+  def getMessage(cell: ActorCell, envelope: Envelope) : MsgEvent = {
     val snd = envelope.sender.path.name
     val rcv = cell.self.path.name
+    
+    val msg = new MsgEvent(snd, rcv, envelope.message, 0)
     val msgs = pendingEvents.getOrElse(rcv, new Queue[(Event, ActorCell, Envelope)])
     
-    val event = new MsgEvent(snd, rcv, envelope.message)
+    val parent = parentEvent match {
+      case null => 
+        val newMsg = MsgEvent("null", "null", null)
+        dep.getOrElseUpdate(newMsg, new HashMap[Event, Event])
+        newMsg
+      case _ => parentEvent
+    }
     
-    pendingEvents(rcv) = msgs += ((event, cell, envelope))
+    val map = dep.get(parent) match {
+      case Some(x) => x
+      case None => throw new Exception("no such parent")
+    }
+    
+    val realMsg = map.get(msg) match {
+      case Some(x : MsgEvent) => x
+      case None =>
+        val newMsg = new MsgEvent(msg.sender, msg.receiver, msg.msg)
+        dep(newMsg) = new HashMap[Event, Event]
+        newMsg
+      case _ => throw new Exception("wrong type")
+    }
+    
+    pendingEvents(rcv) = msgs += ((realMsg, cell, envelope))
+    return realMsg
+  }
+  
+  
+  
+  def event_produced(cell: ActorCell, envelope: Envelope) = {
+
+    val event = getMessage(cell, envelope)
     
     g.add(event)
     pro += event
@@ -318,8 +349,10 @@ class DPOR extends Scheduler {
   def dpor() = {
     
     println(g.nodes.size + " " + pro.size)
-    var currentlyEnabeled = new ArraySeq[ List[Event] ](pro.size)
-
+    var backTrack = new ArraySeq[ List[Event] ](pro.size)
+    var freeze = new ArraySeq[ Boolean ](pro.size)    
+    
+    freeze.map { f => false }
     
     val root = getEvent(0)
     println(root.sender + " -> " + root.receiver + " " + root.id)
@@ -330,8 +363,7 @@ class DPOR extends Scheduler {
       var pathStr = ""
       for(node <- path) {
         node.value match {
-          case x : MsgEvent =>
-            pathStr += " (" + x.receiver + " " + x.id + ") "
+          case x : MsgEvent => pathStr += " (" + x.receiver + " " + x.id + ") "
           case _ => println("NO!")
         }
       }
@@ -371,8 +403,11 @@ class DPOR extends Scheduler {
       require(commonAncestor > -1 && commonAncestor < j)
       
       val values = needtoReplay.map(v => v.value)
-      currentlyEnabeled(i) = values
       
+      if(!freeze(commonAncestor)) {
+        freeze(commonAncestor) = true
+        backTrack(commonAncestor) = values
+      }
 
     }
     
@@ -403,7 +438,12 @@ class DPOR extends Scheduler {
             isCoEnabeled(earlier, later)) {
           analyize_dep(i, j)
         }
+        
       }
+    }
+    
+    for(prefix <- backTrack) {
+      println(prefix)
     }
     
   }
