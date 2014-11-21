@@ -30,21 +30,20 @@ import java.io.{ PrintWriter, File }
 import scalax.collection.edge.LDiEdge,
        scalax.collection.edge.Implicits._,
        scalax.collection.io.dot._
-       
+
+
+
 // A basic scheduler
 class DPOR extends Scheduler {
   
   var instrumenter = Instrumenter
   var currentTime = 0
   var index = 0
-  var dep = new HashMap[Event, HashMap[Event, Event]]
   
   type CurrentTimeQueueT = Queue[Event]
   
   var currentlyProduced = new CurrentTimeQueueT
   var currentlyConsumed = new CurrentTimeQueueT
-  
-  var pro = new Queue[ Event ]
   
   var producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
   var consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
@@ -59,27 +58,47 @@ class DPOR extends Scheduler {
   val pendingEvents = new HashMap[String, Queue[(Event, ActorCell, Envelope)]]  
   val actorNames = new HashSet[String]
  
-  
   val g = Graph[Event, DiEdge]()
   
+  var pro = new Queue[ Event ]
+  var dep = new HashMap[Event, HashMap[Event, Event]]
+  var explored = new HashSet[Event]
+  var backTrack = new ArraySeq[ List[Event] ](100)
+  var freeze = new ArraySeq[ Boolean ](100)    
   
+  freeze.map { f => false }
   
   def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
-    if (sender == null || receiver == null) return true
-    return isSystemMessage(sender.path.name, receiver.path.name)
+    //println("isSystemCommunication " + sender + " " + receiver)
+    if (receiver == null) return true
+    
+    return sender match {
+      case null => 
+        isSystemMessage("deadletters", receiver.path.name)
+      case _ =>
+        isSystemMessage(sender.path.name, receiver.path.name)
+    }
+    
   }
   
   // Is this message a system message
   def isSystemMessage(sender: String, receiver: String): Boolean = {
-    if ((actorNames contains sender) || (actorNames contains receiver))
+    //println("isSystemMessage " + sender + " -> " + receiver)
+    if ((actorNames contains sender) || (actorNames contains receiver)) {
       return false
+    } else {
+      return true      
+    }
     
-    return true
+    
   }
   
   
   // Notification that the system has been reset
   def start_trace() : Unit = {
+    
+    println("Start new trace...")
+    
     prevProducedEvents = producedEvents
     prevConsumedEvents = consumedEvents
     producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
@@ -118,6 +137,9 @@ class DPOR extends Scheduler {
   // Figure out what is the next message to schedule.
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
   
+    println("schedule_new_message " + prevConsumedEvents.size)
+    println("schedule_new_message " + pendingEvents  .size)
+    
     // Filter for messages belong to a particular actor.
     def is_the_same(e: MsgEvent, c: (Event, ActorCell, Envelope)) : Boolean = {
       val (event, cell, env) = c
@@ -150,7 +172,9 @@ class DPOR extends Scheduler {
       case Some(msg_event: MsgEvent) =>
         pendingEvents.get(msg_event.receiver) match {
           case Some(queue) => queue.dequeueFirst(is_the_same(msg_event, _))
-          case None => None
+          case None =>
+            println("NONE")
+            None
         }
       // The trace says there is nothing to run so we have either exhausted our
       // trace or are running for the first time. Use any enabled transitions.
@@ -180,7 +204,7 @@ class DPOR extends Scheduler {
 
   // Record that an event was consumed
   def event_consumed(event: Event) = {
-    //currentlyConsumed.enqueue(event)
+    currentlyConsumed.enqueue(event)
   }
   
   
@@ -199,7 +223,7 @@ class DPOR extends Scheduler {
       case event : SpawnEvent => actorNames += event.name
       case msg : MsgEvent => 
     }
-    //currentlyProduced.enqueue(event)
+    currentlyProduced.enqueue(event)
 
   }
   
@@ -246,6 +270,7 @@ class DPOR extends Scheduler {
     g.add(event)
     pro += event
     
+    println("currentlyProduced: " + event.sender + " -> " + event.receiver)
     currentlyProduced.enqueue(event)
     
     if(parentEvent != null) {
@@ -314,7 +339,7 @@ class DPOR extends Scheduler {
     
     val str = g.toDot(root, edgeTransformer, cNodeTransformer = Some(nodeTransformer))
     
-    println(str)
+    //println(str)
     val pw = new PrintWriter(new File("dot.dot" ))
     pw.write(str)
     pw.close
@@ -324,17 +349,28 @@ class DPOR extends Scheduler {
   
   def notify_quiescence() {
     
-    for((index, queue) <- producedEvents) {
-      
+    for((index, queue) <- consumedEvents) {
+      var str = index.toString() + " "
+      queue.headOption match {
+        case Some(x : MsgEvent) => str += x.sender + " -> " + x.receiver
+        case Some(x : SpawnEvent) => str +=  Console.GREEN + "spawn" + Console.RESET
+        case _ => throw new Exception("missing event")
+      }
+      println(str)
     }
     
-    get_dot()
+    //get_dot()
     currentTime = 0
     
     println("Total " + trace.size + " events.")
     dpor()
+    pro.clear()
     
+    instrumenter().await_enqueue()
+    instrumenter().restart_system()
   }
+  
+  
   
   def getEvent(index: Integer) : MsgEvent = {
     pro(index) match {
@@ -342,17 +378,12 @@ class DPOR extends Scheduler {
       case _ => throw new Exception("internal error not a message")
     }
   }
-  
-  
+
   
   
   def dpor() = {
     
     println(g.nodes.size + " " + pro.size)
-    var backTrack = new ArraySeq[ List[Event] ](pro.size)
-    var freeze = new ArraySeq[ Boolean ](pro.size)    
-    
-    freeze.map { f => false }
     
     val root = getEvent(0)
     println(root.sender + " -> " + root.receiver + " " + root.id)
@@ -397,8 +428,8 @@ class DPOR extends Scheduler {
       //printPath(laterPath)
       //printPath(earlierPath)
 
-      println("Found a race between " + i + 
-          " and " + j + " with a common index " + commonAncestor)
+      //println("Found a race between " + i + 
+      //    " and " + j + " with a common index " + commonAncestor)
       
       require(commonAncestor > -1 && commonAncestor < j)
       
@@ -440,10 +471,6 @@ class DPOR extends Scheduler {
         }
         
       }
-    }
-    
-    for(prefix <- backTrack) {
-      println(prefix)
     }
     
   }

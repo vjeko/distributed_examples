@@ -48,8 +48,10 @@ class Instrumenter {
 
 
   def tell(receiver: ActorRef, msg: Any, sender: ActorRef) : Unit = {
-    if (!scheduler.isSystemCommunication(sender, receiver))
+    if (!scheduler.isSystemCommunication(sender, receiver)) {
+      println("tellEnqueue ")
       tellEnqueue.tell()
+    }
   }
   
   
@@ -117,14 +119,21 @@ class Instrumenter {
     // events, etc.)
     // Kick off the system by replaying a message
     val first_msg = scheduler.next_event() match {
-      case e: MsgEvent => e
+      case e: MsgEvent =>
+        println("first message " + e.sender + " -> " + e.receiver)
+        e
       case _ => throw new Exception("not a message")
     }
     
+
     actorMappings.get(first_msg.receiver) match {
-      case Some(ref) => ref ! first_msg.msg
+      case Some(ref) => 
+        println("\tsending a message " + first_msg.msg + " " + started.get())
+        ref ! first_msg.msg
+        println("\tsending a message " + first_msg.msg + " " + started.get())
       case None => throw new Exception("no such actor " + first_msg.receiver)
     }
+    
   }
   
   
@@ -157,6 +166,7 @@ class Instrumenter {
     
     if (scheduler.isSystemMessage(cell.sender.path.name, cell.self.path.name)) return
    
+    tellEnqueue.reset()
     scheduler.before_receive(cell)
     currentActor = cell.self.path.name
     inActor = true
@@ -234,14 +244,15 @@ class Instrumenter {
     // Have we started dispatching messages (i.e., is the loop in after_message_receive
     // running?). If not then dispatch the current message and start the loop.
     if (!started.get) {
-      println("NEW RUN")
       started.set(true)
+      scheduler.event_consumed(cell, envelope)
       dispatch_next_message()
       return false
     }
+    
     // Record that this event was produced
+    println("tellEnqueue " + tellEnqueue)
     tellEnqueue.enqueue()
-
     
     println(Console.BLUE +  "enqueue: " + snd + " -> " + rcv + Console.RESET);
     // Allowing enqueues from actor now
