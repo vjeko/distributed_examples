@@ -56,7 +56,10 @@ class TellEnqueueBusyWait extends TellEnqueue {
   }
 
   def await () {
-    while (tell_count.get != enqueue_count.get) {}
+    while (tell_count.get != enqueue_count.get) {
+      
+      //println(tell_count.get + " " + enqueue_count.get)
+    }
   }
   
 }
