@@ -40,6 +40,8 @@ class DPOR extends Scheduler {
   var currentTime = 0
   var index = 0
   
+  var iterCount = 0
+  
   type CurrentTimeQueueT = Queue[Event]
   
   var currentlyProduced = new CurrentTimeQueueT
@@ -83,22 +85,16 @@ class DPOR extends Scheduler {
   
   // Is this message a system message
   def isSystemMessage(sender: String, receiver: String): Boolean = {
-    //println("isSystemMessage " + sender + " -> " + receiver)
     if ((actorNames contains sender) || (actorNames contains receiver)) {
       return false
-    } else {
-      return true      
     }
     
-    
+    return true
   }
   
   
   // Notification that the system has been reset
   def start_trace() : Unit = {
-    
-    println("Start new trace...")
-    
     prevProducedEvents = producedEvents
     prevConsumedEvents = consumedEvents
     producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
@@ -136,9 +132,6 @@ class DPOR extends Scheduler {
   
   // Figure out what is the next message to schedule.
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
-  
-    println("schedule_new_message " + prevConsumedEvents.size)
-    println("schedule_new_message " + pendingEvents  .size)
     
     // Filter for messages belong to a particular actor.
     def is_the_same(e: MsgEvent, c: (Event, ActorCell, Envelope)) : Boolean = {
@@ -229,6 +222,18 @@ class DPOR extends Scheduler {
   
   
   def getMessage(cell: ActorCell, envelope: Envelope) : MsgEvent = {
+    
+    
+    def printMap(map: HashMap[Event, Event]) = {
+      for((k, v) <- map) {
+        (k, v) match {
+          case (k: MsgEvent, v: MsgEvent) =>
+            println(k.sender + " -> " + k.receiver + " (" + k.id + ") ")
+        }
+      }
+    }
+    
+    
     val snd = envelope.sender.path.name
     val rcv = cell.self.path.name
     
@@ -237,22 +242,28 @@ class DPOR extends Scheduler {
     
     val parent = parentEvent match {
       case null => 
-        val newMsg = MsgEvent("null", "null", null)
+        val newMsg = MsgEvent("null", "null", null, 0)
         dep.getOrElseUpdate(newMsg, new HashMap[Event, Event])
         newMsg
-      case _ => parentEvent
+      case _ =>
+        parentEvent
     }
     
-    val map = dep.get(parent) match {
+    
+    val parentMap = dep.get(parent) match {
       case Some(x) => x
       case None => throw new Exception("no such parent")
     }
-    
-    val realMsg = map.get(msg) match {
+
+    val realMsg = parentMap.get(msg) match {
       case Some(x : MsgEvent) => x
       case None =>
+        
+        println(Console.YELLOW + "Not seen: " + msg.sender + " -> " + msg.receiver + 
+            " (" + msg.id + ") " + Console.RESET)
         val newMsg = new MsgEvent(msg.sender, msg.receiver, msg.msg)
         dep(newMsg) = new HashMap[Event, Event]
+        parentMap(msg) = newMsg
         newMsg
       case _ => throw new Exception("wrong type")
     }
@@ -270,7 +281,6 @@ class DPOR extends Scheduler {
     g.add(event)
     pro += event
     
-    println("currentlyProduced: " + event.sender + " -> " + event.receiver)
     currentlyProduced.enqueue(event)
     
     if(parentEvent != null) {
@@ -349,25 +359,22 @@ class DPOR extends Scheduler {
   
   def notify_quiescence() {
     
-    for((index, queue) <- consumedEvents) {
-      var str = index.toString() + " "
-      queue.headOption match {
-        case Some(x : MsgEvent) => str += x.sender + " -> " + x.receiver
-        case Some(x : SpawnEvent) => str +=  Console.GREEN + "spawn" + Console.RESET
-        case _ => throw new Exception("missing event")
-      }
-      println(str)
-    }
-    
     //get_dot()
     currentTime = 0
     
     println("Total " + trace.size + " events.")
     dpor()
-    pro.clear()
     
-    instrumenter().await_enqueue()
-    instrumenter().restart_system()
+    iterCount += 1
+    
+    if (iterCount < 2) {
+      pro.clear()
+      parentEvent = null
+      trace.clear()
+      instrumenter().await_enqueue()
+      instrumenter().restart_system()
+    }
+
   }
   
   
@@ -383,12 +390,8 @@ class DPOR extends Scheduler {
   
   def dpor() = {
     
-    println(g.nodes.size + " " + pro.size)
-    
     val root = getEvent(0)
-    println(root.sender + " -> " + root.receiver + " " + root.id)
     val rootN = ( g get root )
-    
     
     def printPath(path : List[g.NodeT]) = {
       var pathStr = ""

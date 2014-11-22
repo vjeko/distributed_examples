@@ -5,7 +5,7 @@ import akka.actor.ActorSystem
 import akka.actor.Props
 
 case class Stop()
-case class Init(msg: Set[ActorRef])
+case class Init(msg: Set[String])
 case class DataMessage(seq: Int, data: String)
 case class RB_Broadcast(msg: DataMessage)
 case class BEB_Broadcast(msg: DataMessage)
@@ -20,13 +20,10 @@ class FireStarter(_system: ActorSystem) extends Actor {
   def start() = {
     val system = context.system;
 
-    val ids = List.range(0, 5);
-    val startFun = (i: Int) =>
-      system.actorOf(Props[Node], name = "I-" + i.toString())
+    val names = List.range(0, 5).map(i => "I-" + i.toString())
+    val nodes = names.map(i => system.actorOf(Props[Node], name = i))
 
-    val nodes = ids.map(i => startFun(i))
-
-    nodes.map(node => node ! Init(nodes.toSet))
+    nodes.map(node => node ! Init(names.toSet))
     nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]))
 
     nodes(0) ! RB_Broadcast(DataMessage(1, "Message"))
@@ -91,11 +88,13 @@ class Node extends Actor {
     rb_deliver(msg)
     beb_broadcast(msg)
   }
+  
 
-  def init(nodes: NodeSetT) {
+  def init(names: Set[String]) {
     println("Initializing actor " + self.path.name)
-    allActors = nodes
+    allActors = names.map(i => context.actorFor("../" + i))
   }
+  
 
   def receive = {
     case d: DeadLetter => allActors = allActors - d.recipient

@@ -48,10 +48,9 @@ class Instrumenter {
 
 
   def tell(receiver: ActorRef, msg: Any, sender: ActorRef) : Unit = {
-    if (!scheduler.isSystemCommunication(sender, receiver)) {
-      println("tellEnqueue ")
+    if (!scheduler.isSystemCommunication(sender, receiver))
       tellEnqueue.tell()
-    }
+
   }
   
   
@@ -110,7 +109,6 @@ class Instrumenter {
     for (args <- argQueue) {
       args match {
         case (actor: ActorRef, props: Props, first_spawn.name) =>
-          println("starting " + first_spawn.name)
           newSystem.actorOf(props, first_spawn.name)
       }
     }
@@ -119,18 +117,13 @@ class Instrumenter {
     // events, etc.)
     // Kick off the system by replaying a message
     val first_msg = scheduler.next_event() match {
-      case e: MsgEvent =>
-        println("first message " + e.sender + " -> " + e.receiver)
-        e
+      case e: MsgEvent => e
       case _ => throw new Exception("not a message")
     }
     
 
     actorMappings.get(first_msg.receiver) match {
-      case Some(ref) => 
-        println("\tsending a message " + first_msg.msg + " " + started.get())
-        ref ! first_msg.msg
-        println("\tsending a message " + first_msg.msg + " " + started.get())
+      case Some(ref) => ref ! first_msg.msg
       case None => throw new Exception("no such actor " + first_msg.receiver)
     }
     
@@ -251,7 +244,6 @@ class Instrumenter {
     }
     
     // Record that this event was produced
-    println("tellEnqueue " + tellEnqueue)
     tellEnqueue.enqueue()
     
     println(Console.BLUE +  "enqueue: " + snd + " -> " + rcv + Console.RESET);
