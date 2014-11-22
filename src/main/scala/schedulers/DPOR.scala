@@ -42,16 +42,11 @@ class DPOR extends Scheduler {
   
   var iterCount = 0
   
-  type CurrentTimeQueueT = Queue[Event]
+  var producedEvents = new Queue[ (Integer, Event) ]
+  var consumedEvents = new Queue[ (Integer, Event) ]
   
-  var currentlyProduced = new CurrentTimeQueueT
-  var currentlyConsumed = new CurrentTimeQueueT
-  
-  var producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  var consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  
-  var prevProducedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-  var prevConsumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+  var prevProducedEvents = new Queue[ (Integer, Event) ]
+  var prevConsumedEvents = new Queue[ (Integer, Event) ]
  
   var parentEvent : Event = null
   var trace = new ArrayBuffer[(Event, HashSet[Event])]
@@ -67,6 +62,7 @@ class DPOR extends Scheduler {
   var explored = new HashSet[Event]
   var backTrack = new ArraySeq[ List[Event] ](100)
   var freeze = new ArraySeq[ Boolean ](100)    
+  val alreadyExplored = new HashSet[(Event, Event)]
   
   freeze.map { f => false }
   
@@ -97,30 +93,25 @@ class DPOR extends Scheduler {
   def start_trace() : Unit = {
     prevProducedEvents = producedEvents
     prevConsumedEvents = consumedEvents
-    producedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
-    consumedEvents = new Queue[ (Integer, CurrentTimeQueueT) ]
+    producedEvents = new Queue[ (Integer, Event) ]
+    consumedEvents = new Queue[ (Integer, Event) ]
   }
   
   
   // When executing a trace, find the next trace event.
   private[this] def mutable_trace_iterator(
-      trace: Queue[ (Integer, CurrentTimeQueueT) ]) : Option[Event] = { 
+      trace: Queue[ (Integer, Event) ]) : Option[Event] = { 
     
     if(trace.isEmpty) return None
       
-    val (count, q) = trace.head
-    q.isEmpty match {
-      case true =>
-        trace.dequeue()
-        mutable_trace_iterator(trace)
-      case false => return Some(q.dequeue())
-    }
+    val (count, e) = trace.dequeue
+    return Some(e)
   }
   
   
 
   // Get next message event from the trace.
-  private[this] def get_next_trace_message() : Option[MsgEvent] = {
+  def get_next_trace_message() : Option[MsgEvent] = {
     mutable_trace_iterator(prevConsumedEvents) match {
       case Some(v : MsgEvent) =>  Some(v)
       case Some(v : Event) => get_next_trace_message()
@@ -165,9 +156,7 @@ class DPOR extends Scheduler {
       case Some(msg_event: MsgEvent) =>
         pendingEvents.get(msg_event.receiver) match {
           case Some(queue) => queue.dequeueFirst(is_the_same(msg_event, _))
-          case None =>
-            println("NONE")
-            None
+          case None => None
         }
       // The trace says there is nothing to run so we have either exhausted our
       // trace or are running for the first time. Use any enabled transitions.
@@ -197,7 +186,8 @@ class DPOR extends Scheduler {
 
   // Record that an event was consumed
   def event_consumed(event: Event) = {
-    currentlyConsumed.enqueue(event)
+    consumedEvents.enqueue((currentTime, event))
+    currentTime += 1
   }
   
   
@@ -205,7 +195,8 @@ class DPOR extends Scheduler {
     var event = new MsgEvent(
         envelope.sender.path.name, cell.self.path.name, 
         envelope.message)
-    currentlyConsumed.enqueue(event)
+    consumedEvents.enqueue((currentTime, event))
+    currentTime += 1
   }
   
   
@@ -218,8 +209,9 @@ class DPOR extends Scheduler {
         actorNames += event.name
       case msg : MsgEvent => 
     }
-    currentlyProduced.enqueue(event)
-
+    
+    producedEvents.enqueue((currentTime, event))
+    currentTime += 1
   }
   
   
@@ -283,7 +275,8 @@ class DPOR extends Scheduler {
     g.add(event)
     pro += event
     
-    currentlyProduced.enqueue(event)
+    producedEvents.enqueue((currentTime, event))
+    currentTime += 1
     
     if(parentEvent != null) {
       g.addEdge(event, parentEvent)(DiEdge)
@@ -294,12 +287,6 @@ class DPOR extends Scheduler {
   
   // Called before we start processing a newly received event
   def before_receive(cell: ActorCell) {
-    producedEvents.enqueue( (currentTime, currentlyProduced) )
-    consumedEvents.enqueue( (currentTime, currentlyConsumed) )
-
-    currentlyProduced = new CurrentTimeQueueT
-    currentlyConsumed = new CurrentTimeQueueT
-    currentTime += 1
     //println(Console.GREEN 
     //    + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
     //    Console.RESET)
@@ -366,13 +353,14 @@ class DPOR extends Scheduler {
     println("Total " + trace.size + " events.")
     println("-------------------------------------------------")
     dpor()
-    
+    println("-------------------------------------------------")
+
     iterCount += 1
     
     if (iterCount < 2) {
       pro.clear()
-      parentEvent = null
       trace.clear()
+      parentEvent = null
       instrumenter().await_enqueue()
       instrumenter().restart_system()
     }
@@ -412,6 +400,8 @@ class DPOR extends Scheduler {
       val later = getEvent(i)
       val earlier = getEvent(j)
       
+      alreadyExplored += ((earlier, later))
+      
       val earlierN = (g get earlier)
       val laterN = (g get later)
       
@@ -437,7 +427,10 @@ class DPOR extends Scheduler {
       
       val values = needtoReplay.map(v => v.value)
       
-      if(!freeze(commonAncestor)) {
+      if(  !freeze(commonAncestor) &&
+           !alreadyExplored.contains((later, earlier))
+           ) {
+        
         println("Found a race between " + i + 
             " and " + j + " with a common index " + commonAncestor)
         
