@@ -116,7 +116,6 @@ class Instrumenter {
     // TODO: Maybe we should do this differently (the same way we inject external
     // events, etc.)
     // Kick off the system by replaying a message
-    
     val first_msg = scheduler.next_event() match {
       case e: MsgEvent => e
       case _ => throw new Exception("not a message")

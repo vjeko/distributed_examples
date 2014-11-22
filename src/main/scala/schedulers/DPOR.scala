@@ -42,11 +42,13 @@ class DPOR extends Scheduler {
   
   var iterCount = 0
   
-  var producedEvents = new Queue[ (Integer, Event) ]
-  var consumedEvents = new Queue[ (Integer, Event) ]
+  var producedEvents = new Queue[ Event ]
+  var consumedEvents = new Queue[ Event ]
   
-  var prevProducedEvents = new Queue[ (Integer, Event) ]
-  var prevConsumedEvents = new Queue[ (Integer, Event) ]
+  //var prevProducedEvents = new Queue[ Event ]
+  //var prevConsumedEvents = new Queue[ Event ]
+  
+  var nextEvents = new Queue[ Event ]
  
   var parentEvent : Event = null
   var trace = new ArrayBuffer[(Event, HashSet[Event])]
@@ -91,28 +93,23 @@ class DPOR extends Scheduler {
   
   // Notification that the system has been reset
   def start_trace() : Unit = {
-    prevProducedEvents = producedEvents
-    prevConsumedEvents = consumedEvents
-    producedEvents = new Queue[ (Integer, Event) ]
-    consumedEvents = new Queue[ (Integer, Event) ]
+
   }
   
   
   // When executing a trace, find the next trace event.
   private[this] def mutable_trace_iterator(
-      trace: Queue[ (Integer, Event) ]) : Option[Event] = { 
+      trace: Queue[  Event ]) : Option[Event] = { 
     
     if(trace.isEmpty) return None
-      
-    val (count, e) = trace.dequeue
-    return Some(e)
+    return Some(trace.dequeue)
   }
   
   
 
   // Get next message event from the trace.
   def get_next_trace_message() : Option[MsgEvent] = {
-    mutable_trace_iterator(prevConsumedEvents) match {
+    mutable_trace_iterator(nextEvents) match {
       case Some(v : MsgEvent) =>  Some(v)
       case Some(v : Event) => get_next_trace_message()
       case None => None
@@ -177,7 +174,7 @@ class DPOR extends Scheduler {
   
   // Get next event
   def next_event() : Event = {
-    mutable_trace_iterator(prevConsumedEvents) match {
+    mutable_trace_iterator(nextEvents) match {
       case Some(v) => v
       case None => throw new Exception("no previously consumed events")
     }
@@ -186,7 +183,7 @@ class DPOR extends Scheduler {
 
   // Record that an event was consumed
   def event_consumed(event: Event) = {
-    consumedEvents.enqueue((currentTime, event))
+    consumedEvents.enqueue( event )
     currentTime += 1
   }
   
@@ -195,7 +192,7 @@ class DPOR extends Scheduler {
     var event = new MsgEvent(
         envelope.sender.path.name, cell.self.path.name, 
         envelope.message)
-    consumedEvents.enqueue((currentTime, event))
+    consumedEvents.enqueue( event )
     currentTime += 1
   }
   
@@ -210,7 +207,7 @@ class DPOR extends Scheduler {
       case msg : MsgEvent => 
     }
     
-    producedEvents.enqueue((currentTime, event))
+    producedEvents.enqueue( event )
     currentTime += 1
   }
   
@@ -273,9 +270,9 @@ class DPOR extends Scheduler {
     val event = getMessage(cell, envelope)
     
     g.add(event)
-    pro += event
+    //pro += event
     
-    producedEvents.enqueue((currentTime, event))
+    producedEvents.enqueue( event )
     currentTime += 1
     
     if(parentEvent != null) {
@@ -349,15 +346,32 @@ class DPOR extends Scheduler {
     
     //get_dot()
     currentTime = 0
+    pro = producedEvents.filter(x => x.isInstanceOf[MsgEvent])
     
     println("Total " + trace.size + " events.")
     println("-------------------------------------------------")
-    dpor()
+    var nnnn = dpor()
     println("-------------------------------------------------")
 
     iterCount += 1
     
-    if (iterCount < 2) {
+    // XXX: JUST A QUICK FIX. MAGIC NUMBER AHEAD.
+    nextEvents.clear()
+    nextEvents ++= consumedEvents.take(8)
+    nextEvents ++= nnnn.drop(1)
+    
+    for (i <- Range(0, 16) ) {
+      //println("Consumed: " + consumedEvents(i))
+      //println("nextEvents " + nextEvents(i))
+      //println()
+    }
+    
+    //nextEvents ++= pro
+    
+    producedEvents = new Queue[ Event ]
+    consumedEvents = new Queue[ Event ]
+    
+    if (iterCount < 30) {
       pro.clear()
       trace.clear()
       parentEvent = null
@@ -378,7 +392,7 @@ class DPOR extends Scheduler {
 
   
   
-  def dpor() = {
+  def dpor() : Queue[Event] = {
     
     val root = getEvent(0)
     val rootN = ( g get root )
@@ -470,6 +484,18 @@ class DPOR extends Scheduler {
         
       }
     }
+    
+    
+    var maxIndex = 0
+    for(i <- Range(0, backTrack.size -1)) {
+      if (backTrack(i) != null) maxIndex = i
+    }
+    
+    require(freeze(maxIndex) == true)
+    freeze(maxIndex) = false
+    
+    //return pro.take(maxIndex) ++ backTrack(maxIndex)
+    return pro.take(maxIndex)
     
   }
   
