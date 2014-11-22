@@ -67,8 +67,6 @@ class Instrumenter {
     }
     
     actorMappings(name) = actor
-      
-    println("System has created a new actor: " + actor.path.name)
   }
   
   
@@ -184,7 +182,6 @@ class Instrumenter {
       case Some((new_cell, envelope)) => dispatch_new_message(new_cell, envelope)
       case None =>
         counter += 1
-        println("Nothing to run.")
         started.set(false)
         scheduler.notify_quiescence()
     }
@@ -246,7 +243,6 @@ class Instrumenter {
     // Record that this event was produced
     tellEnqueue.enqueue()
     
-    println(Console.BLUE +  "enqueue: " + snd + " -> " + rcv + Console.RESET);
     // Allowing enqueues from actor now
     //require(inActor)
 
