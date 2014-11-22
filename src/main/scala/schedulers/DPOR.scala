@@ -213,7 +213,9 @@ class DPOR extends Scheduler {
   def event_produced(event: Event) = {
         
     event match {
-      case event : SpawnEvent => actorNames += event.name
+      case event : SpawnEvent => 
+        //println("System has created a new actor: " + event.name)
+        actorNames += event.name
       case msg : MsgEvent => 
     }
     currentlyProduced.enqueue(event)
@@ -259,8 +261,8 @@ class DPOR extends Scheduler {
       case Some(x : MsgEvent) => x
       case None =>
         
-        println(Console.YELLOW + "Not seen: " + msg.sender + " -> " + msg.receiver + 
-            " (" + msg.id + ") " + Console.RESET)
+        //println(Console.YELLOW + "Not seen: " + msg.sender + " -> " + msg.receiver + 
+        //    " (" + msg.id + ") " + Console.RESET)
         val newMsg = new MsgEvent(msg.sender, msg.receiver, msg.msg)
         dep(newMsg) = new HashMap[Event, Event]
         parentMap(msg) = newMsg
@@ -298,18 +300,17 @@ class DPOR extends Scheduler {
     currentlyProduced = new CurrentTimeQueueT
     currentlyConsumed = new CurrentTimeQueueT
     currentTime += 1
-    println(Console.GREEN 
-        + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
-        Console.RESET)
+    //println(Console.GREEN 
+    //    + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
+    //    Console.RESET)
   }
   
   
   // Called after receive is done being processed 
   def after_receive(cell: ActorCell) {
-    println(Console.RED 
-        + " ↑↑↑↑↑↑↑↑↑ ⌚  " + currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
-        + Console.RESET)
-        
+    //println(Console.RED 
+    //    + " ↑↑↑↑↑↑↑↑↑ ⌚  " + currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
+    //    + Console.RESET)
   }
   
   def get_dot() {
@@ -363,6 +364,7 @@ class DPOR extends Scheduler {
     currentTime = 0
     
     println("Total " + trace.size + " events.")
+    println("-------------------------------------------------")
     dpor()
     
     iterCount += 1
