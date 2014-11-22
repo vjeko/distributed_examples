@@ -432,15 +432,15 @@ class DPOR extends Scheduler {
 
       //printPath(laterPath)
       //printPath(earlierPath)
-
-      //println("Found a race between " + i + 
-      //    " and " + j + " with a common index " + commonAncestor)
       
       require(commonAncestor > -1 && commonAncestor < j)
       
       val values = needtoReplay.map(v => v.value)
       
       if(!freeze(commonAncestor)) {
+        println("Found a race between " + i + 
+            " and " + j + " with a common index " + commonAncestor)
+        
         freeze(commonAncestor) = true
         backTrack(commonAncestor) = values
       }
