@@ -22,8 +22,8 @@ import scala.collection.concurrent.TrieMap,
 import scalax.collection.mutable.Graph,
        scalax.collection.GraphPredef._, 
        scalax.collection.GraphEdge._,
-       scalax.collection.edge.LDiEdge,     // labeled directed edge
-       scalax.collection.edge.Implicits._ // shortcuts
+       scalax.collection.edge.LDiEdge,
+       scalax.collection.edge.Implicits._
        
 import java.io.{ PrintWriter, File }
 
@@ -45,13 +45,10 @@ class DPOR extends Scheduler {
   var producedEvents = new Queue[ Event ]
   var consumedEvents = new Queue[ Event ]
   
-  //var prevProducedEvents = new Queue[ Event ]
-  //var prevConsumedEvents = new Queue[ Event ]
+  var trace = new Queue[ Event ]
   
   var nextEvents = new Queue[ Event ]
- 
   var parentEvent : Event = null
-  var trace = new ArrayBuffer[(Event, HashSet[Event])]
   
   // Current set of enabled events.
   val pendingEvents = new HashMap[String, Queue[(Event, ActorCell, Envelope)]]  
@@ -59,12 +56,13 @@ class DPOR extends Scheduler {
  
   val g = Graph[Event, DiEdge]()
   
-  var pro = new Queue[ Event ]
   var dep = new HashMap[Event, HashMap[Event, Event]]
   var explored = new HashSet[Event]
-  var backTrack = new ArraySeq[ List[Event] ](100)
+  var backTrack = new ArraySeq[ (Queue[Integer], List[Event]) ](100)
   var freeze = new ArraySeq[ Boolean ](100)    
   val alreadyExplored = new HashSet[(Event, Event)]
+  val alreadyExplored2 = new HashSet[(Integer, Integer)]
+  var invariant : Queue[Integer] = Queue()
   
   freeze.map { f => false }
   
@@ -110,7 +108,7 @@ class DPOR extends Scheduler {
   // Get next message event from the trace.
   def get_next_trace_message() : Option[MsgEvent] = {
     mutable_trace_iterator(nextEvents) match {
-      case Some(v : MsgEvent) =>  Some(v)
+      case Some(v : MsgEvent) => Some(v)
       case Some(v : Event) => get_next_trace_message()
       case None => None
     }
@@ -123,37 +121,63 @@ class DPOR extends Scheduler {
     
     // Filter for messages belong to a particular actor.
     def is_the_same(e: MsgEvent, c: (Event, ActorCell, Envelope)) : Boolean = {
-      val (event, cell, env) = c
-      e.receiver == cell.self.path.name
+      c match {
+        case (event :MsgEvent, cell, env) =>
+          if (e.id == 0) e.receiver == cell.self.path.name
+          else e.receiver == cell.self.path.name && e.id == event.id
+        case _ => throw new Exception("not a message event")
+      }
+      
     }
 
     // Get from the current set of pending events.
-    def get_pending_event()  : Option[(Event, ActorCell, Envelope)] = {
+    def get_pending_event(): Option[(Event, ActorCell, Envelope)] = {
       // Do we have some pending events
       pendingEvents.headOption match {
         case Some((receiver, queue)) =>
-           if (queue.isEmpty == true) {
-             
-             pendingEvents.remove(receiver) match {
-               case Some(key) => get_pending_event()
-               case None => throw new Exception("internal error")
-             }
-             
-           } else {
-              Some(queue.dequeue())
-           }
-        case None =>
-          //instrumenter().restart_system()
-          None
+
+          if (queue.isEmpty == true) {
+            
+            pendingEvents.remove(receiver) match {
+              case Some(key) => get_pending_event()
+              case None => throw new Exception("internal error")
+            }
+
+          } else {
+            Some(queue.dequeue())
+            
+          }
+        case None => None
       }
+    }
+    
+    def printMsgs(queue: Queue[(Event, ActorCell, Envelope)]) = {
+      var str = "queue : "
+      for((item, _ , _) <- queue) {
+        item match {
+          case m : MsgEvent => str += m.id + " "
+        }
+      }
+      println(str)
     }
 
     val result = get_next_trace_message() match {
       // The trace says there is something to run.
       case Some(msg_event: MsgEvent) =>
+        
         pendingEvents.get(msg_event.receiver) match {
-          case Some(queue) => queue.dequeueFirst(is_the_same(msg_event, _))
-          case None => None
+          case Some(queue) =>
+            val result = queue.dequeueFirst(is_the_same(msg_event, _))
+            if (result == None ) {
+              println("queue size " + queue.size)
+              for ((s, item) <- pendingEvents) item match {
+                case q => printMsgs(q) 
+              }
+                 
+              
+            }
+            result
+          case None =>  throw new Exception("replay mismatch")
         }
       // The trace says there is nothing to run so we have either exhausted our
       // trace or are running for the first time. Use any enabled transitions.
@@ -162,10 +186,27 @@ class DPOR extends Scheduler {
     
     result match {
       case Some((next_event, c, e)) =>
+        
+        next_event match {
+          case m : MsgEvent =>
+            println("now playing " + m.id)
+            
+            trace += m
+            
+            if (!invariant.isEmpty) {
+              if(invariant.head == m.id) {
+                println("Replaying a message " + invariant.head)
+                invariant.dequeue()
+              }
+            }
+        }
+        
         (g get next_event)
         parentEvent = next_event
         return Some((c, e))
-      case _ => return None
+      case _ =>
+        println("NONE")
+        return None
     }
     
     
@@ -184,7 +225,6 @@ class DPOR extends Scheduler {
   // Record that an event was consumed
   def event_consumed(event: Event) = {
     consumedEvents.enqueue( event )
-    currentTime += 1
   }
   
   
@@ -193,7 +233,6 @@ class DPOR extends Scheduler {
         envelope.sender.path.name, cell.self.path.name, 
         envelope.message)
     consumedEvents.enqueue( event )
-    currentTime += 1
   }
   
   
@@ -201,9 +240,7 @@ class DPOR extends Scheduler {
   def event_produced(event: Event) = {
         
     event match {
-      case event : SpawnEvent => 
-        //println("System has created a new actor: " + event.name)
-        actorNames += event.name
+      case event : SpawnEvent => actorNames += event.name
       case msg : MsgEvent => 
     }
     
@@ -250,8 +287,8 @@ class DPOR extends Scheduler {
       case Some(x : MsgEvent) => x
       case None =>
         
-        //println(Console.YELLOW + "Not seen: " + msg.sender + " -> " + msg.receiver + 
-        //    " (" + msg.id + ") " + Console.RESET)
+        println(Console.YELLOW + "Not seen: " + msg.sender + " -> " + msg.receiver + 
+            " (" + msg.id + ") " + Console.RESET)
         val newMsg = new MsgEvent(msg.sender, msg.receiver, msg.msg)
         dep(newMsg) = new HashMap[Event, Event]
         parentMap(msg) = newMsg
@@ -269,15 +306,13 @@ class DPOR extends Scheduler {
 
     val event = getMessage(cell, envelope)
     
-    g.add(event)
-    //pro += event
+    println(Console.BLUE + event.id + Console.RESET)
     
+    g.add(event)
     producedEvents.enqueue( event )
-    currentTime += 1
     
     if(parentEvent != null) {
       g.addEdge(event, parentEvent)(DiEdge)
-      trace += ((event, new HashSet[Event]))
     }
   }
   
@@ -285,7 +320,7 @@ class DPOR extends Scheduler {
   // Called before we start processing a newly received event
   def before_receive(cell: ActorCell) {
     //println(Console.GREEN 
-    //    + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " + 
+    //    + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " +
     //    Console.RESET)
   }
   
@@ -346,9 +381,26 @@ class DPOR extends Scheduler {
     
     //get_dot()
     currentTime = 0
-    pro = producedEvents.filter(x => x.isInstanceOf[MsgEvent])
     
-    println("Total " + trace.size + " events.")
+    var str1 = "trace: "
+    for (item <- trace) {
+      item match {
+        case m : MsgEvent => str1 += m.id + " " 
+        case _ =>
+      }
+    }
+    
+    var str2 = "producedEvents: "
+    for (item <- producedEvents) {
+      item match {
+        case m : MsgEvent => str2 += m.id + " " 
+        case _ =>
+      }
+    }
+    
+    println(str1)
+    println(str2)
+    
     println("-------------------------------------------------")
     var nnnn = dpor()
     println("-------------------------------------------------")
@@ -358,23 +410,26 @@ class DPOR extends Scheduler {
     // XXX: JUST A QUICK FIX. MAGIC NUMBER AHEAD.
     nextEvents.clear()
     nextEvents ++= consumedEvents.take(8)
+    
+    for (e <- nextEvents) e match {
+      case m :MsgEvent => m.id = 0
+      case _ =>
+     }
+
     nextEvents ++= nnnn.drop(1)
     
-    for (i <- Range(0, 16) ) {
-      //println("Consumed: " + consumedEvents(i))
-      //println("nextEvents " + nextEvents(i))
-      //println()
-    }
+    for (e <- nextEvents) e match {
+      case m :MsgEvent => println("id " + m.id)
+      case _ =>
+     }
     
-    //nextEvents ++= pro
-    
-    producedEvents = new Queue[ Event ]
-    consumedEvents = new Queue[ Event ]
-    
+    producedEvents.clear()
+    consumedEvents.clear()
+  
+    trace.clear()
+    parentEvent = null
+    pendingEvents.clear()
     if (iterCount < 30) {
-      pro.clear()
-      trace.clear()
-      parentEvent = null
       instrumenter().await_enqueue()
       instrumenter().restart_system()
     }
@@ -384,7 +439,7 @@ class DPOR extends Scheduler {
   
   
   def getEvent(index: Integer) : MsgEvent = {
-    pro(index) match {
+    trace(index) match {
       case eee : MsgEvent => eee
       case _ => throw new Exception("internal error not a message")
     }
@@ -401,20 +456,22 @@ class DPOR extends Scheduler {
       var pathStr = ""
       for(node <- path) {
         node.value match {
-          case x : MsgEvent => pathStr += " (" + x.receiver + " " + x.id + ") "
+          case x : MsgEvent => pathStr += x.id + " "
           case _ => println("NO!")
         }
       }
       println("path -> " + pathStr)
     }
     
+    val freezeSet = new ArrayBuffer[Integer]
     
-    def analyize_dep(j: Integer, i: Integer) : Unit = {
+    def analyize_dep(earlierI: Integer, laterI: Integer) : Unit = {
       
-      val later = getEvent(i)
-      val earlier = getEvent(j)
+      val earlier = getEvent(earlierI)
+      val later = getEvent(laterI)
       
       alreadyExplored += ((earlier, later))
+      //println("\t" + earlier.id + " " + later.id)
       
       val earlierN = (g get earlier)
       val laterN = (g get later)
@@ -432,24 +489,29 @@ class DPOR extends Scheduler {
       val commonPrefix = laterPath.intersect(earlierPath)
       val needtoReplay = laterPath.diff(commonPrefix)
       val lastElement = commonPrefix.last
-      val commonAncestor = pro.indexWhere { e => (e == lastElement.value) }
-
-      //printPath(laterPath)
-      //printPath(earlierPath)
+      val commonAncestor = trace.indexWhere { e => (e == lastElement.value) }
       
-      require(commonAncestor > -1 && commonAncestor < j)
+      require(commonAncestor > -1 && commonAncestor < laterI)
       
       val values = needtoReplay.map(v => v.value)
       
       if(  !freeze(commonAncestor) &&
            !alreadyExplored.contains((later, earlier))
            ) {
+      
+      printPath(laterPath)
+      printPath(needtoReplay)
+
+      
+      //printPath(earlierPath)
         
-        println("Found a race between " + i + 
-            " and " + j + " with a common index " + commonAncestor)
+        println("Found a race between " + earlier.id +  " and " + 
+            later.id + " with a common index " + commonAncestor)
         
         freeze(commonAncestor) = true
-        backTrack(commonAncestor) = values
+        freezeSet += commonAncestor
+        val pair: Queue[Integer] = Queue(later.id, earlier.id)
+        backTrack(commonAncestor) = (pair, values)
       }
 
     }
@@ -470,16 +532,17 @@ class DPOR extends Scheduler {
     }
     
 
+    require(invariant.isEmpty)
     
-    for(i <- 0 to pro.size - 1) {
-      val later = getEvent(i)
+    for(laterI <- 0 to trace.size - 1) {
+      val later = getEvent(laterI)
 
-      for(j <- 0 to i - 1) {
-        val earlier = getEvent(j)
+      for(earlierI <- 0 to laterI - 1) {
+        val earlier = getEvent(earlierI)
         
         if (earlier.receiver == later.receiver &&
             isCoEnabeled(earlier, later)) {
-          analyize_dep(i, j)
+          analyize_dep(earlierI, laterI)
         }
         
       }
@@ -488,14 +551,24 @@ class DPOR extends Scheduler {
     
     var maxIndex = 0
     for(i <- Range(0, backTrack.size -1)) {
-      if (backTrack(i) != null) maxIndex = i
+      if (backTrack(i) != null) {
+        maxIndex = i
+      }
     }
     
     require(freeze(maxIndex) == true)
     freeze(maxIndex) = false
+    invariant = backTrack(maxIndex)._1.clone()
+    var tmp = backTrack(maxIndex)._1.clone()
+    val tuple = (tmp.dequeue(), tmp.dequeue())
     
-    //return pro.take(maxIndex) ++ backTrack(maxIndex)
-    return pro.take(maxIndex)
+    println("new invariant -> " + backTrack(maxIndex)._1)
+    //require( !(alreadyExplored2 contains tuple) )
+    alreadyExplored2 += tuple
+    
+    val result =  trace.take(maxIndex + 1) ++ backTrack(maxIndex)._2
+    backTrack(maxIndex) = null
+    return result
     
   }
   

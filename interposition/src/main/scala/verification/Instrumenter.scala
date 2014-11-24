@@ -133,8 +133,6 @@ class Instrumenter {
   // Signal to the instrumenter that the scheduler wants to restart the system
   def restart_system() = {
     
-    println("Restarting system")
-    
     started.set(false)
     tellEnqueue.reset()
     
@@ -147,7 +145,6 @@ class Instrumenter {
 
     seenActors.clear()
     for ((system, argQueue) <- allSystems) {
-        println("Shutting down the actor system. " + argQueue.size)
         system.shutdown()
         system.registerOnTermination(reinitialize_system(system, argQueue))
     }

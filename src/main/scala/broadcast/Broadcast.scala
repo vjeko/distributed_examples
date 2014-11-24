@@ -63,23 +63,40 @@ class Node extends Actor {
   type NodeSetT = Set[ActorRef]
   type DeliveredT = Set[DataMessage]
 
+  var started = false
+  
   var allActors: NodeSetT = Set()
   var delivered: DeliveredT = Set()
 
   def rb_bradcast(msg: DataMessage) {
+    if (!started) {
+      println("not started")
+    }
+    
     beb_broadcast(msg)
   }
 
   def beb_broadcast(msg: DataMessage) {
+    if (!started) {
+      println("not started")
+    }
+    
     allActors.map(node => node ! BEB_Deliver(msg))
   }
 
   def rb_deliver(msg: DataMessage) {
-    println(self.path.name + " reliably delivered a broadcast mesage " + msg)
+    if (!started) {
+      println("not started")
+    }
+    //println(self.path.name + " reliably delivered a broadcast mesage " + msg)
   }
 
   def beb_deliver(msg: DataMessage) {
 
+    if (!started) {
+      println("not started")
+    }
+    
     if (delivered contains msg) {
       return
     }
@@ -91,7 +108,8 @@ class Node extends Actor {
   
 
   def init(names: Set[String]) {
-    println("Initializing actor " + self.path.name)
+    started = true
+    //println("Initializing actor " + self.path.name)
     allActors = names.map(i => context.actorFor("../" + i))
   }
   
