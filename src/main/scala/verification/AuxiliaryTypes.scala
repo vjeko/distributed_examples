@@ -11,7 +11,7 @@ import java.util.concurrent.Semaphore
 abstract class Event
 
 case class MsgEvent(sender: String, receiver: String, msg: Any, 
-    id: Integer = IDGenerator.get()) extends Event
+    var id: Integer = IDGenerator.get()) extends Event
 
 case class SpawnEvent(parent: String,
     props: Props, name: String, actor: ActorRef, 
