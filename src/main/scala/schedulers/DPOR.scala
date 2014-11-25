@@ -103,6 +103,7 @@ class DPOR extends Scheduler with LazyLogging {
   
   // Notification that the system has been reset
   def start_trace() : Unit = {
+    actorNames.clear
   }
   
   
@@ -180,6 +181,8 @@ class DPOR extends Scheduler with LazyLogging {
           case Some(queue) =>
             val result = queue.dequeueFirst(is_the_same(msg_event, _))
             if (result == None ) {
+              println(msg_event.sender + " " + msg_event.receiver)
+              println(actorNames)
               logger.trace( "queue size " + queue.size )
               for ((s, item) <- pendingEvents) item match {
                 case q => 
@@ -201,7 +204,10 @@ class DPOR extends Scheduler with LazyLogging {
         
         next_event match {
           case m : MsgEvent =>
-            logger.trace( Console.GREEN + "Now playing: " + m.id + Console.RESET )
+            logger.trace( Console.GREEN + "Now playing: " +
+                "(" + m.sender + " -> " + m.receiver + ") " +
+                + m.id +
+                Console.RESET )
             
             trace += m
             
@@ -307,7 +313,10 @@ class DPOR extends Scheduler with LazyLogging {
 
     val event = getMessage(cell, envelope)
     
-    logger.trace(Console.BLUE + "New event: " + event.id + Console.RESET)
+    logger.trace(Console.BLUE + "New event: " +
+        "(" + event.sender + " -> " + event.receiver + ") " +
+        event.id + 
+        Console.RESET)
     
     g.add(event)
     producedEvents.enqueue( event )
