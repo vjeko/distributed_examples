@@ -298,7 +298,7 @@ class DPOR extends Scheduler with LazyLogging {
     }
 
     val realMsg = parentMap.get(msg) match {
-      case Some(x : MsgEvent) => x
+      case Some(x : MsgEvent) =>   x
       case None =>
         val newMsg = new MsgEvent(msg.sender, msg.receiver, msg.msg)
         
@@ -393,6 +393,30 @@ class DPOR extends Scheduler with LazyLogging {
 
   
   
+  def printPath(path : List[g.NodeT]) : String = {
+    var pathStr = ""
+    for(node <- path) {
+      node.value match {
+        case x : MsgEvent => pathStr += x.id + " "
+        case _ => throw new Exception("internal error not a message")
+      }
+    }
+    return pathStr
+  }
+  
+  def printTrace(events : Queue[Event]) : String = {
+    var str = ""
+    for (item <- events) {
+      item match {
+        case m : MsgEvent => str += m.id + " " 
+        case _ =>
+      }
+    }
+    
+    return str
+  }
+  
+  
   def notify_quiescence() {
     
     //get_dot()
@@ -405,17 +429,6 @@ class DPOR extends Scheduler with LazyLogging {
         case _ =>
       }
     }
-    
-    var str2 = "producedEvents: "
-    for (item <- producedEvents) {
-      item match {
-        case m : MsgEvent => str2 += m.id + " " 
-        case _ =>
-      }
-    }
-    
-    //println(str1)
-    //println(str2)
     
     println("-------------------------------------------------")
     var nnnn = dpor()
@@ -433,6 +446,12 @@ class DPOR extends Scheduler with LazyLogging {
      }
 
     nextEvents ++= nnnn.drop(1)
+    
+    logger.trace(Console.RED + "Current trace: " +
+        printTrace(trace) + Console.RESET)
+    
+    logger.trace(Console.RED + "Next trace:  " + 
+        printTrace(nextEvents) + Console.RESET)
     
     producedEvents.clear()
     consumedEvents.clear()
@@ -462,17 +481,6 @@ class DPOR extends Scheduler with LazyLogging {
     
     val root = getEvent(0)
     val rootN = ( g get root )
-    
-    def printPath(path : List[g.NodeT]) = {
-      var pathStr = ""
-      for(node <- path) {
-        node.value match {
-          case x : MsgEvent => pathStr += x.id + " "
-          case _ => println("NO!")
-        }
-      }
-      //println("path -> " + pathStr)
-    }
     
     val freezeSet = new ArrayBuffer[Integer]
     
@@ -510,12 +518,10 @@ class DPOR extends Scheduler with LazyLogging {
            !alreadyExplored.contains((later, earlier))
            ) {
       
-      //printPath(laterPath)
-      //printPath(needtoReplay)
+      logger.trace(Console.CYAN + "Earlier: " + printPath(earlierPath) + Console.RESET)
+      logger.trace(Console.CYAN + "Later:   " + printPath(laterPath) + Console.RESET)
+      logger.trace(Console.CYAN + "Replay:  " + printPath(needtoReplay) + Console.RESET)
 
-      
-      //printPath(earlierPath)
-        
         println("Found a race between " + earlier.id +  " and " + 
             later.id + " with a common index " + commonAncestor)
         
