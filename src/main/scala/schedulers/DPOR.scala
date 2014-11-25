@@ -30,12 +30,23 @@ import java.io.{ PrintWriter, File }
 import scalax.collection.edge.LDiEdge,
        scalax.collection.edge.Implicits._,
        scalax.collection.io.dot._
+       
+import com.typesafe.scalalogging.LazyLogging
 
+import org.slf4j.LoggerFactory;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 
 
 // A basic scheduler
-class DPOR extends Scheduler {
+class DPOR extends Scheduler with LazyLogging {
   
+  def urlses(cl: ClassLoader): Array[java.net.URL] = cl match {
+    case null => Array()
+    case u: java.net.URLClassLoader => u.getURLs() ++ urlses(cl.getParent)
+    case _ => urlses(cl.getParent)
+  }
+
   var instrumenter = Instrumenter
   var currentTime = 0
   var index = 0
@@ -66,6 +77,7 @@ class DPOR extends Scheduler {
   
   freeze.map { f => false }
   
+  
   def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
     //println("isSystemCommunication " + sender + " " + receiver)
     if (receiver == null) return true
@@ -91,7 +103,10 @@ class DPOR extends Scheduler {
   
   // Notification that the system has been reset
   def start_trace() : Unit = {
-
+    
+    //val  urls = urlses(getClass.getClassLoader)
+    //println(urls.filterNot(_.toString.contains("ivy")).mkString("\n"))
+      
   }
   
   
@@ -151,14 +166,14 @@ class DPOR extends Scheduler {
       }
     }
     
-    def printMsgs(queue: Queue[(Event, ActorCell, Envelope)]) = {
-      var str = "queue : "
+    def queuetoStr(queue: Queue[(Event, ActorCell, Envelope)]) : String = {
+      var str = " "
       for((item, _ , _) <- queue) {
         item match {
           case m : MsgEvent => str += m.id + " "
         }
       }
-      println(str)
+      return str
     }
 
     val result = get_next_trace_message() match {
@@ -169,9 +184,10 @@ class DPOR extends Scheduler {
           case Some(queue) =>
             val result = queue.dequeueFirst(is_the_same(msg_event, _))
             if (result == None ) {
-              println("queue size " + queue.size)
+              logger.trace( "queue size " + queue.size )
               for ((s, item) <- pendingEvents) item match {
-                case q => printMsgs(q) 
+                case q => 
+                  logger.trace( "queue content: " + queuetoStr(q) ) 
               }
                  
               
@@ -189,7 +205,7 @@ class DPOR extends Scheduler {
         
         next_event match {
           case m : MsgEvent =>
-            println("now playing " + m.id)
+            logger.trace( Console.GREEN + "Now playing: " + m.id + Console.RESET )
             
             trace += m
             
@@ -204,9 +220,7 @@ class DPOR extends Scheduler {
         (g get next_event)
         parentEvent = next_event
         return Some((c, e))
-      case _ =>
-        println("NONE")
-        return None
+      case _ => return None
     }
     
     
@@ -286,10 +300,12 @@ class DPOR extends Scheduler {
     val realMsg = parentMap.get(msg) match {
       case Some(x : MsgEvent) => x
       case None =>
-        
-        println(Console.YELLOW + "Not seen: " + msg.sender + " -> " + msg.receiver + 
-            " (" + msg.id + ") " + Console.RESET)
         val newMsg = new MsgEvent(msg.sender, msg.receiver, msg.msg)
+        
+        logger.warn(
+            Console.YELLOW + "Not seen: " + newMsg.id + 
+            " (" + newMsg.sender + " -> " + newMsg.receiver + ") " + Console.RESET)
+            
         dep(newMsg) = new HashMap[Event, Event]
         parentMap(msg) = newMsg
         newMsg
@@ -306,7 +322,7 @@ class DPOR extends Scheduler {
 
     val event = getMessage(cell, envelope)
     
-    println(Console.BLUE + event.id + Console.RESET)
+    logger.trace(Console.BLUE + "New event: " + event.id + Console.RESET)
     
     g.add(event)
     producedEvents.enqueue( event )
@@ -398,8 +414,8 @@ class DPOR extends Scheduler {
       }
     }
     
-    println(str1)
-    println(str2)
+    //println(str1)
+    //println(str2)
     
     println("-------------------------------------------------")
     var nnnn = dpor()
@@ -418,18 +434,13 @@ class DPOR extends Scheduler {
 
     nextEvents ++= nnnn.drop(1)
     
-    for (e <- nextEvents) e match {
-      case m :MsgEvent => println("id " + m.id)
-      case _ =>
-     }
-    
     producedEvents.clear()
     consumedEvents.clear()
   
     trace.clear()
     parentEvent = null
     pendingEvents.clear()
-    if (iterCount < 30) {
+    if (iterCount < 300) {
       instrumenter().await_enqueue()
       instrumenter().restart_system()
     }
@@ -460,7 +471,7 @@ class DPOR extends Scheduler {
           case _ => println("NO!")
         }
       }
-      println("path -> " + pathStr)
+      //println("path -> " + pathStr)
     }
     
     val freezeSet = new ArrayBuffer[Integer]
@@ -499,8 +510,8 @@ class DPOR extends Scheduler {
            !alreadyExplored.contains((later, earlier))
            ) {
       
-      printPath(laterPath)
-      printPath(needtoReplay)
+      //printPath(laterPath)
+      //printPath(needtoReplay)
 
       
       //printPath(earlierPath)

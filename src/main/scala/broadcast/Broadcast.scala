@@ -70,7 +70,7 @@ class Node extends Actor {
 
   def rb_bradcast(msg: DataMessage) {
     if (!started) {
-      println("not started")
+      //println("not started")
     }
     
     beb_broadcast(msg)
@@ -78,7 +78,7 @@ class Node extends Actor {
 
   def beb_broadcast(msg: DataMessage) {
     if (!started) {
-      println("not started")
+      //println("not started")
     }
     
     allActors.map(node => node ! BEB_Deliver(msg))
@@ -86,7 +86,7 @@ class Node extends Actor {
 
   def rb_deliver(msg: DataMessage) {
     if (!started) {
-      println("not started")
+      //println("not started")
     }
     //println(self.path.name + " reliably delivered a broadcast mesage " + msg)
   }
@@ -94,7 +94,7 @@ class Node extends Actor {
   def beb_deliver(msg: DataMessage) {
 
     if (!started) {
-      println("not started")
+      //println("not started")
     }
     
     if (delivered contains msg) {
