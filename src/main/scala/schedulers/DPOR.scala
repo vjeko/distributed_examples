@@ -79,7 +79,7 @@ class DPOR extends Scheduler with LazyLogging {
   
   
   def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
-    //println("isSystemCommunication " + sender + " " + receiver)
+
     if (receiver == null) return true
     
     return sender match {
@@ -103,10 +103,6 @@ class DPOR extends Scheduler with LazyLogging {
   
   // Notification that the system has been reset
   def start_trace() : Unit = {
-    
-    //val  urls = urlses(getClass.getClassLoader)
-    //println(urls.filterNot(_.toString.contains("ivy")).mkString("\n"))
-      
   }
   
   
@@ -211,7 +207,7 @@ class DPOR extends Scheduler with LazyLogging {
             
             if (!invariant.isEmpty) {
               if(invariant.head == m.id) {
-                println("Replaying a message " + invariant.head)
+                logger.info("Replaying a message " + invariant.head)
                 invariant.dequeue()
               }
             }
@@ -264,17 +260,6 @@ class DPOR extends Scheduler with LazyLogging {
   
   
   def getMessage(cell: ActorCell, envelope: Envelope) : MsgEvent = {
-    
-    
-    def printMap(map: HashMap[Event, Event]) = {
-      for((k, v) <- map) {
-        (k, v) match {
-          case (k: MsgEvent, v: MsgEvent) =>
-            println(k.sender + " -> " + k.receiver + " (" + k.id + ") ")
-        }
-      }
-    }
-    
     
     val snd = envelope.sender.path.name
     val rcv = cell.self.path.name
@@ -335,7 +320,7 @@ class DPOR extends Scheduler with LazyLogging {
   
   // Called before we start processing a newly received event
   def before_receive(cell: ActorCell) {
-    //println(Console.GREEN 
+    //logger.trace(Console.GREEN 
     //    + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " +
     //    Console.RESET)
   }
@@ -343,7 +328,7 @@ class DPOR extends Scheduler with LazyLogging {
   
   // Called after receive is done being processed 
   def after_receive(cell: ActorCell) {
-    //println(Console.RED 
+    //logger.trace(Console.RED 
     //    + " ↑↑↑↑↑↑↑↑↑ ⌚  " + currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
     //    + Console.RESET)
   }
@@ -385,7 +370,6 @@ class DPOR extends Scheduler with LazyLogging {
     
     val str = g.toDot(root, edgeTransformer, cNodeTransformer = Some(nodeTransformer))
     
-    //println(str)
     val pw = new PrintWriter(new File("dot.dot" ))
     pw.write(str)
     pw.close
@@ -430,9 +414,9 @@ class DPOR extends Scheduler with LazyLogging {
       }
     }
     
-    println("-------------------------------------------------")
+    logger.info("-------------------------------------------------")
     var nnnn = dpor()
-    println("-------------------------------------------------")
+    logger.info("-------------------------------------------------")
 
     iterCount += 1
     
@@ -459,7 +443,7 @@ class DPOR extends Scheduler with LazyLogging {
     trace.clear()
     parentEvent = null
     pendingEvents.clear()
-    if (iterCount < 300) {
+    if (iterCount < 3000) {
       instrumenter().await_enqueue()
       instrumenter().restart_system()
     }
@@ -490,7 +474,6 @@ class DPOR extends Scheduler with LazyLogging {
       val later = getEvent(laterI)
       
       alreadyExplored += ((earlier, later))
-      //println("\t" + earlier.id + " " + later.id)
       
       val earlierN = (g get earlier)
       val laterN = (g get later)
@@ -506,23 +489,33 @@ class DPOR extends Scheduler with LazyLogging {
       }
       
       val commonPrefix = laterPath.intersect(earlierPath)
-      val needtoReplay = laterPath.diff(commonPrefix)
+      
+      val laterDiff = laterPath.diff(commonPrefix)
+      val earlierDiff = earlierPath.diff(commonPrefix)
+
+      val needToReplay = 
+        earlierDiff.take(earlierDiff.size - 1) ++ laterDiff
+      
       val lastElement = commonPrefix.last
       val commonAncestor = trace.indexWhere { e => (e == lastElement.value) }
       
       require(commonAncestor > -1 && commonAncestor < laterI)
       
-      val values = needtoReplay.map(v => v.value)
+      val values = needToReplay.map(v => v.value)
+      
       
       if(  !freeze(commonAncestor) &&
            !alreadyExplored.contains((later, earlier))
            ) {
       
-      logger.trace(Console.CYAN + "Earlier: " + printPath(earlierPath) + Console.RESET)
-      logger.trace(Console.CYAN + "Later:   " + printPath(laterPath) + Console.RESET)
-      logger.trace(Console.CYAN + "Replay:  " + printPath(needtoReplay) + Console.RESET)
+        logger.trace(Console.CYAN + "Earlier: " + 
+            printPath(earlierPath) + Console.RESET)
+        logger.trace(Console.CYAN + "Later:   " + 
+            printPath(laterPath) + Console.RESET)
+        logger.trace(Console.CYAN + "Replay:  " + 
+            printPath(needToReplay) + Console.RESET)
 
-        println("Found a race between " + earlier.id +  " and " + 
+        logger.info("Found a race between " + earlier.id +  " and " + 
             later.id + " with a common index " + commonAncestor)
         
         freeze(commonAncestor) = true
@@ -579,7 +572,7 @@ class DPOR extends Scheduler with LazyLogging {
     var tmp = backTrack(maxIndex)._1.clone()
     val tuple = (tmp.dequeue(), tmp.dequeue())
     
-    println("new invariant -> " + backTrack(maxIndex)._1)
+    logger.info("Next message ordering -> " + backTrack(maxIndex)._1)
     //require( !(alreadyExplored2 contains tuple) )
     alreadyExplored2 += tuple
     
