@@ -67,6 +67,8 @@ class DPOR extends Scheduler with LazyLogging {
  
   val g = Graph[Event, DiEdge]()
   
+  
+  var dep2 = new Queue[ HashMap[String, Queue[Event]] ]
   var dep = new HashMap[Event, HashMap[Event, Event]]
   var explored = new HashSet[Event]
   var backTrack = new ArraySeq[ (Queue[Integer], List[Event]) ](100)
@@ -206,10 +208,17 @@ class DPOR extends Scheduler with LazyLogging {
           case m : MsgEvent =>
             logger.trace( Console.GREEN + "Now playing: " +
                 "(" + m.sender + " -> " + m.receiver + ") " +
-                + m.id +
-                Console.RESET )
+                + m.id + Console.RESET )
             
             trace += m
+            
+            val newMapping = dep2.lastOption match {
+              case None => new HashMap[String, Queue[Event]]
+              case Some(last) => last.clone()
+            }
+            
+            newMapping(m.receiver) = newMapping.getOrElse(m.receiver, new Queue[Event]) += m
+            dep2.enqueue( newMapping )
             
             if (!invariant.isEmpty) {
               if(invariant.head == m.id) {
@@ -248,6 +257,7 @@ class DPOR extends Scheduler with LazyLogging {
     var event = new MsgEvent(
         envelope.sender.path.name, cell.self.path.name, 
         envelope.message)
+    
     consumedEvents.enqueue( event )
   }
   
@@ -261,7 +271,6 @@ class DPOR extends Scheduler with LazyLogging {
     }
     
     producedEvents.enqueue( event )
-    currentTime += 1
   }
   
   
@@ -449,7 +458,8 @@ class DPOR extends Scheduler with LazyLogging {
     producedEvents.clear()
     consumedEvents.clear()
   
-    trace.clear()
+    trace.clear
+    dep2.clear
     parentEvent = null
     pendingEvents.clear()
     if (iterCount < 3000) {
@@ -523,7 +533,13 @@ class DPOR extends Scheduler with LazyLogging {
             printPath(laterPath) + Console.RESET)
         logger.trace(Console.CYAN + "Replay:  " + 
             printPath(needToReplay) + Console.RESET)
-
+        
+        val rcvsDeps = dep2(laterI)(later.receiver)
+        println("Number of deps: " + rcvsDeps.size)
+        for(e <- rcvsDeps) e.value match {
+          case m: MsgEvent => println(m.sender + " -> " + m.receiver + " (" + m.id + ")")
+        }
+            
         logger.info("Found a race between " + earlier.id +  " and " + 
             later.id + " with a common index " + commonAncestor)
         
