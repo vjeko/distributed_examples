@@ -14,7 +14,6 @@ object Main extends App {
   val system = ActorSystem("Broadcast")
   val fireStarter = system.actorOf(
       Props(new FireStarter()),
-      name="firestarter")
+      name="FS")
   fireStarter ! 0
-
 }

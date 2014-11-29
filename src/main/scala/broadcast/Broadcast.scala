@@ -232,6 +232,7 @@ class BroadcastNode(id: Int) extends Actor {
     vcLog("RBDeliver of message " + msg + " from " + senderName)
     beb_broadcast(msg)
   }
+  
 
   def vcLog(msg: String, otherVC:VectorClock = null) {
     vc = vc :+ name
