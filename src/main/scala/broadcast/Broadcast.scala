@@ -20,7 +20,7 @@ class FireStarter(_system: ActorSystem) extends Actor {
   def start() = {
     val system = context.system;
 
-    val names = List.range(0, 5).map(i => "I-" + i.toString())
+    val names = List.range(0, 3).map(i => "I-" + i.toString())
     val nodes = names.map(i => system.actorOf(Props[Node], name = i))
 
     nodes.map(node => node ! Init(names.toSet))
@@ -69,7 +69,7 @@ class Node extends Actor {
   var delivered: DeliveredT = Set()
 
   def rb_bradcast(msg: DataMessage) {
-    println("rb_bradcast")
+    //println("rb_bradcast")
     if (!started) {
       //println("not started")
     }
@@ -78,7 +78,7 @@ class Node extends Actor {
   }
 
   def beb_broadcast(msg: DataMessage) {
-    println("beb_broadcast")
+    //println("beb_broadcast")
     if (!started) {
       //println("not started")
     }
@@ -110,7 +110,7 @@ class Node extends Actor {
   
 
   def init(names: Set[String]) {
-    println("init " + self.path.name)
+    //println("init " + self.path.name)
     started = true
     //println("Initializing actor " + self.path.name)
     allActors = names.map(i => context.actorFor("../" + i))

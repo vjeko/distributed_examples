@@ -20,22 +20,13 @@ import scala.collection.concurrent.TrieMap,
        scala.collection.Iterator
 
 import scalax.collection.mutable.Graph,
-       scalax.collection.GraphPredef._, 
-       scalax.collection.GraphEdge._,
-       scalax.collection.edge.LDiEdge,
-       scalax.collection.edge.Implicits._
+       scalax.collection.GraphEdge.DiEdge,
+       scalax.collection.edge.LDiEdge
        
-import java.io.{ PrintWriter, File }
-
-import scalax.collection.edge.LDiEdge,
-       scalax.collection.edge.Implicits._,
-       scalax.collection.io.dot._
-       
-import com.typesafe.scalalogging.LazyLogging
-
-import org.slf4j.LoggerFactory;
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
+import com.typesafe.scalalogging.LazyLogging,
+       org.slf4j.LoggerFactory,
+       ch.qos.logback.classic.Level,
+       ch.qos.logback.classic.Logger
 
 
 // A basic scheduler
@@ -51,7 +42,7 @@ class DPOR extends Scheduler with LazyLogging {
   var currentTime = 0
   var index = 0
   
-  var iterCount = 0
+  var interleavingCounter = 0
   
   var producedEvents = new Queue[ Event ]
   var consumedEvents = new Queue[ Event ]
@@ -68,14 +59,13 @@ class DPOR extends Scheduler with LazyLogging {
   val g = Graph[Event, DiEdge]()
   
   
-  var dep2 = new Queue[ HashMap[String, Queue[Event]] ]
   var dep = new HashMap[Event, HashMap[Event, Event]]
   var explored = new HashSet[Event]
-  var backTrack = new ArraySeq[ (Queue[Integer], List[Event]) ](100)
-  var freeze = new ArraySeq[ Boolean ](100)    
+  var backTrack = new ArraySeq[ ((Event, Event), List[Event]) ](100)
+  var freeze = new ArraySeq[ Boolean ](100)   
+  val freezeSet = new HashSet[Integer]
   val alreadyExplored = new HashSet[(Event, Event)]
-  val alreadyExplored2 = new HashSet[(Integer, Integer)]
-  var invariant : Queue[Integer] = Queue()
+  var invariant : Queue[Event] = Queue()
   
   freeze.map { f => false }
   
@@ -133,12 +123,12 @@ class DPOR extends Scheduler with LazyLogging {
   // Figure out what is the next message to schedule.
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
     
-    // Filter for messages belong to a particular actor.
-    def is_the_same(e: MsgEvent, c: (Event, ActorCell, Envelope)) : Boolean = {
-      c match {
-        case (event :MsgEvent, cell, env) =>
-          if (e.id == 0) e.receiver == cell.self.path.name
-          else e.receiver == cell.self.path.name && e.id == event.id
+    // Filter messages belonging to a particular actor.
+    def is_the_same(msg: MsgEvent, other: (Event, ActorCell, Envelope)) : Boolean = {
+      other match {
+        case (event: MsgEvent, cell, env) =>
+          if (msg.id == 0) msg.receiver == cell.self.path.name
+          else msg.receiver == cell.self.path.name && msg.id == event.id
         case _ => throw new Exception("not a message event")
       }
       
@@ -165,76 +155,64 @@ class DPOR extends Scheduler with LazyLogging {
       }
     }
     
-    def queuetoStr(queue: Queue[(Event, ActorCell, Envelope)]) : String = {
-      var str = " "
-      for((item, _ , _) <- queue) {
-        item match {
-          case m : MsgEvent => str += m.id + " "
-        }
-      }
-      return str
-    }
 
-    val result = get_next_trace_message() match {
-      // The trace says there is something to run.
+    val matchingMessage = get_next_trace_message() match {
+      // The trace says there is a message event to run.
       case Some(msg_event: MsgEvent) =>
         
+        // Look at the pending events to see if such message event exists. 
         pendingEvents.get(msg_event.receiver) match {
-          case Some(queue) =>
-            val result = queue.dequeueFirst(is_the_same(msg_event, _))
-            if (result == None ) {
-              println(msg_event.sender + " " + msg_event.receiver)
-              println(actorNames)
-              logger.trace( "queue size " + queue.size )
-              for ((s, item) <- pendingEvents) item match {
-                case q => 
-                  logger.trace( "queue content: " + queuetoStr(q) ) 
-              }
-                 
-              
-            }
-            result
-          case None =>  throw new Exception("replay mismatch")
+          case Some(queue) => queue.dequeueFirst(is_the_same(msg_event, _))
+          case None =>  None
         }
+        
       // The trace says there is nothing to run so we have either exhausted our
       // trace or are running for the first time. Use any enabled transitions.
-      case None => get_pending_event()
+      case None => None
     }
     
+    
+    val result = matchingMessage match {
+      
+      // There is a pending event that matches a message in our trace.
+      // We call this a convergent state.
+      case Some((next_event: MsgEvent, c, e)) =>
+
+        logger.trace( Console.GREEN + "Now playing: " +
+            "(" + next_event.sender + " -> " + next_event.receiver + ") " +
+            + next_event.id + Console.RESET )
+
+        Some((next_event, c, e))
+
+
+      // We call this a divergent state.
+      case None => get_pending_event()
+      
+      // Something went wrong.
+      case _ => throw new Exception("not a message")
+    }
+    
+
     result match {
-      case Some((next_event, c, e)) =>
+      
+      case Some((next_event : MsgEvent, cell, env)) =>
         
-        next_event match {
-          case m : MsgEvent =>
-            logger.trace( Console.GREEN + "Now playing: " +
-                "(" + m.sender + " -> " + m.receiver + ") " +
-                + m.id + Console.RESET )
-            
-            trace += m
-            
-            val newMapping = dep2.lastOption match {
-              case None => new HashMap[String, Queue[Event]]
-              case Some(last) => last.clone()
-            }
-            
-            newMapping(m.receiver) = newMapping.getOrElse(m.receiver, new Queue[Event]) += m
-            dep2.enqueue( newMapping )
-            
-            if (!invariant.isEmpty) {
-              if(invariant.head == m.id) {
-                logger.info("Replaying a message " + invariant.head)
-                invariant.dequeue()
-              }
-            }
+        
+        invariant.headOption match {
+          case Some(msg: MsgEvent) if (msg.id == next_event.id) => 
+            logger.trace("Replaying a message " + invariant.head)
+            invariant.dequeue()
+          case _ =>
         }
         
+        trace += next_event
         (g get next_event)
         parentEvent = next_event
-        return Some((c, e))
+        return Some((cell, env))
+        
       case _ => return None
     }
-    
-    
+
   }
   
   
@@ -298,11 +276,11 @@ class DPOR extends Scheduler with LazyLogging {
     }
 
     val realMsg = parentMap.get(msg) match {
-      case Some(x : MsgEvent) =>   x
+      case Some(x : MsgEvent) => x
       case None =>
         val newMsg = new MsgEvent(msg.sender, msg.receiver, msg.msg)
         
-        logger.warn(
+        logger.trace(
             Console.YELLOW + "Not seen: " + newMsg.id + 
             " (" + newMsg.sender + " -> " + newMsg.receiver + ") " + Console.RESET)
             
@@ -351,49 +329,7 @@ class DPOR extends Scheduler with LazyLogging {
     //    + Console.RESET)
   }
   
-  def get_dot() {
-    val root = DotRootGraph(
-        directed = true,
-        id = Some("DPOR"))
 
-    def nodeStr(event: Event) : String = {
-      event.value match {
-        case msg : MsgEvent => msg.receiver + " (" + msg.id.toString() + ")" 
-        case spawn : SpawnEvent => spawn.name + " (" + spawn.id.toString() + ")" 
-      }
-    }
-    
-    def nodeTransformer(
-        innerNode: scalax.collection.Graph[Event, DiEdge]#NodeT):
-        Option[(DotGraph, DotNodeStmt)] = {
-      val descr = innerNode.value match {
-        case msg : MsgEvent => DotNodeStmt( nodeStr(msg), Seq.empty[DotAttr])
-        case spawn : SpawnEvent => DotNodeStmt( nodeStr(spawn), Seq(DotAttr("color", "red")))
-      }
-
-      Some(root, descr)
-    }
-    
-    def edgeTransformer(
-        innerEdge: scalax.collection.Graph[Event, DiEdge]#EdgeT): 
-        Option[(DotGraph, DotEdgeStmt)] = {
-      
-      val edge = innerEdge.edge
-
-      val src = nodeStr( edge.from.value )
-      val dst = nodeStr( edge.to.value )
-
-      return Some(root, DotEdgeStmt(src, dst, Nil))
-    }
-    
-    val str = g.toDot(root, edgeTransformer, cNodeTransformer = Some(nodeTransformer))
-    
-    val pw = new PrintWriter(new File("dot.dot" ))
-    pw.write(str)
-    pw.close
-  }
-
-  
   
   def printPath(path : List[g.NodeT]) : String = {
     var pathStr = ""
@@ -406,17 +342,7 @@ class DPOR extends Scheduler with LazyLogging {
     return pathStr
   }
   
-  def printTrace(events : Queue[Event]) : String = {
-    var str = ""
-    for (item <- events) {
-      item match {
-        case m : MsgEvent => str += m.id + " " 
-        case _ =>
-      }
-    }
-    
-    return str
-  }
+
   
   
   def notify_quiescence() {
@@ -432,11 +358,15 @@ class DPOR extends Scheduler with LazyLogging {
       }
     }
     
-    logger.info("-------------------------------------------------")
+    logger.info("\n--------------------- Interleaving #" +
+                interleavingCounter + " ---------------------")
+    
+    logger.debug(Console.BLUE + "Current trace: " +
+        Util.traceStr(trace) + Console.RESET)
+        
     var nnnn = dpor()
-    logger.info("-------------------------------------------------")
 
-    iterCount += 1
+    interleavingCounter += 1
     
     // XXX: JUST A QUICK FIX. MAGIC NUMBER AHEAD.
     nextEvents.clear()
@@ -449,23 +379,20 @@ class DPOR extends Scheduler with LazyLogging {
 
     nextEvents ++= nnnn.drop(1)
     
-    logger.trace(Console.RED + "Current trace: " +
-        printTrace(trace) + Console.RESET)
-    
-    logger.trace(Console.RED + "Next trace:  " + 
-        printTrace(nextEvents) + Console.RESET)
+    logger.debug(Console.BLUE + "Next trace:  " + 
+        Util.traceStr(nextEvents) + Console.RESET)
     
     producedEvents.clear()
     consumedEvents.clear()
   
     trace.clear
-    dep2.clear
+    
     parentEvent = null
     pendingEvents.clear()
-    if (iterCount < 3000) {
-      instrumenter().await_enqueue()
-      instrumenter().restart_system()
-    }
+
+    instrumenter().await_enqueue()
+    instrumenter().restart_system()
+
 
   }
   
@@ -485,7 +412,9 @@ class DPOR extends Scheduler with LazyLogging {
     val root = getEvent(0)
     val rootN = ( g get root )
     
-    val freezeSet = new ArrayBuffer[Integer]
+    val racingIndices = new HashSet[Integer]
+    
+    
     
     def analyize_dep(earlierI: Integer, laterI: Integer) : Unit = {
       
@@ -522,31 +451,38 @@ class DPOR extends Scheduler with LazyLogging {
       
       val values = needToReplay.map(v => v.value)
       
-      
-      if(  !freeze(commonAncestor) &&
-           !alreadyExplored.contains((later, earlier))
-           ) {
-      
-        logger.trace(Console.CYAN + "Earlier: " + 
-            printPath(earlierPath) + Console.RESET)
-        logger.trace(Console.CYAN + "Later:   " + 
-            printPath(laterPath) + Console.RESET)
-        logger.trace(Console.CYAN + "Replay:  " + 
-            printPath(needToReplay) + Console.RESET)
+      val frozen = freeze(commonAncestor)
+      val explored = alreadyExplored.contains((later, earlier))
+      (frozen, explored) match {
         
-        val rcvsDeps = dep2(laterI)(later.receiver)
-        println("Number of deps: " + rcvsDeps.size)
-        for(e <- rcvsDeps) e.value match {
-          case m: MsgEvent => println(m.sender + " -> " + m.receiver + " (" + m.id + ")")
-        }
-            
-        logger.info("Found a race between " + earlier.id +  " and " + 
-            later.id + " with a common index " + commonAncestor)
-        
-        freeze(commonAncestor) = true
-        freezeSet += commonAncestor
-        val pair: Queue[Integer] = Queue(later.id, earlier.id)
-        backTrack(commonAncestor) = (pair, values)
+        case (false, false) =>
+          logger.trace(Console.CYAN + "Earlier: " + 
+              printPath(earlierPath) + Console.RESET)
+          logger.trace(Console.CYAN + "Later:   " + 
+              printPath(laterPath) + Console.RESET)
+          logger.trace(Console.CYAN + "Replay:  " + 
+              printPath(needToReplay) + Console.RESET)
+          logger.info(Console.GREEN + 
+              "Found a race between " + earlier.id +  " and " + 
+              later.id + " with a common index " + commonAncestor +
+              Console.RESET)
+              
+          freeze(commonAncestor) = true
+          freezeSet += commonAncestor
+
+  
+          val racingPair = ((later, earlier))
+          backTrack(commonAncestor) = (racingPair, values)
+          
+          racingIndices += commonAncestor
+          
+          
+        case (true, false) =>
+          racingIndices += commonAncestor
+          
+          
+        case _ =>
+          logger.debug("\tAlready explored " + commonAncestor)
       }
 
     }
@@ -567,7 +503,7 @@ class DPOR extends Scheduler with LazyLogging {
     }
     
 
-    require(invariant.isEmpty)
+    //require(invariant.isEmpty)
     
     for(laterI <- 0 to trace.size - 1) {
       val later = getEvent(laterI)
@@ -575,8 +511,8 @@ class DPOR extends Scheduler with LazyLogging {
       for(earlierI <- 0 to laterI - 1) {
         val earlier = getEvent(earlierI)
         
-        if (earlier.receiver == later.receiver &&
-            isCoEnabeled(earlier, later)) {
+        val sameReceiver = earlier.receiver == later.receiver
+        if (sameReceiver && isCoEnabeled(earlier, later)) {
           analyize_dep(earlierI, laterI)
         }
         
@@ -584,24 +520,34 @@ class DPOR extends Scheduler with LazyLogging {
     }
     
     
-    var maxIndex = 0
+    var maxIndex = -1
     for(i <- Range(0, backTrack.size -1)) {
       if (backTrack(i) != null) {
         maxIndex = i
       }
     }
     
+    if (maxIndex == -1) {
+      logger.info("Tutto finito!")
+      System.exit(0)
+    }
+    
     require(freeze(maxIndex) == true)
     freeze(maxIndex) = false
-    invariant = backTrack(maxIndex)._1.clone()
-    var tmp = backTrack(maxIndex)._1.clone()
-    val tuple = (tmp.dequeue(), tmp.dequeue())
+    freezeSet -= maxIndex
     
-    logger.info("Next message ordering -> " + backTrack(maxIndex)._1)
-    //require( !(alreadyExplored2 contains tuple) )
-    alreadyExplored2 += tuple
+    logger.info(Console.RED + "Exploring a new message interleaving -> " + 
+        backTrack(maxIndex)._1 + " at index " + maxIndex + Console.RESET)
     
-    val result =  trace.take(maxIndex + 1) ++ backTrack(maxIndex)._2
+    logger.debug("Unexplored indices: " + racingIndices)
+    logger.debug("Frozen indices:     " + freezeSet)
+    
+    val ((e1, e2), replayThis) = backTrack(maxIndex)
+    invariant = Queue(e1, e2)
+    
+    alreadyExplored += ((e1, e2))
+    
+    val result =  trace.take(maxIndex + 1) ++ replayThis
     backTrack(maxIndex) = null
     return result
     

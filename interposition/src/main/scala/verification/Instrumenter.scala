@@ -87,7 +87,6 @@ class Instrumenter {
     require(scheduler != null)
     val newSystem = ActorSystem("new-system-" + counter)
     counter += 1
-    println("Started a new actor system.")
 
     // Tell scheduler that we are done restarting and it should prepare
     // to start the system
