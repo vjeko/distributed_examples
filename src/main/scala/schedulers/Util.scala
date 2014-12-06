@@ -57,6 +57,7 @@ object Util {
   
     
   def get_dot(g: Graph[Event, DiEdge]) {
+    
     val root = DotRootGraph(
         directed = true,
         id = Some("DPOR"))
@@ -91,6 +92,7 @@ object Util {
       return Some(root, DotEdgeStmt(src, dst, Nil))
     }
     
+    
     val str = g.toDot(root, edgeTransformer, cNodeTransformer = Some(nodeTransformer))
     
     val pw = new PrintWriter(new File("dot.dot" ))
@@ -98,6 +100,13 @@ object Util {
     pw.close
   }
 
+  
+  
+  def urlses(cl: ClassLoader): Array[java.net.URL] = cl match {
+    case null => Array()
+    case u: java.net.URLClassLoader => u.getURLs() ++ urlses(cl.getParent)
+    case _ => urlses(cl.getParent)
+  }
   
     
 }

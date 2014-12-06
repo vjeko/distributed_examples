@@ -32,91 +32,78 @@ import com.typesafe.scalalogging.LazyLogging,
 // A basic scheduler
 class DPOR extends Scheduler with LazyLogging {
   
-  def urlses(cl: ClassLoader): Array[java.net.URL] = cl match {
-    case null => Array()
-    case u: java.net.URLClassLoader => u.getURLs() ++ urlses(cl.getParent)
-    case _ => urlses(cl.getParent)
-  }
-
   var instrumenter = Instrumenter
-  var currentTime = 0
-  var index = 0
   
+  var currentTime = 0
   var interleavingCounter = 0
   
-  var producedEvents = new Queue[ Event ]
-  var consumedEvents = new Queue[ Event ]
-  
-  var trace = new Queue[ Event ]
-  
-  var nextEvents = new Queue[ Event ]
-  var parentEvent : Event = null
+  val producedEvents = new Queue[ Event ]
+  val consumedEvents = new Queue[ Event ]
   
   // Current set of enabled events.
   val pendingEvents = new HashMap[String, Queue[(Event, ActorCell, Envelope)]]  
   val actorNames = new HashSet[String]
  
-  val g = Graph[Event, DiEdge]()
+  val depGraph = Graph[Event, DiEdge]()
+  var depMap = new HashMap[Event, HashMap[Event, Event]]
   
-  
-  var dep = new HashMap[Event, HashMap[Event, Event]]
-  var explored = new HashSet[Event]
-  var backTrack = new ArraySeq[ ((Event, Event), List[Event]) ](100)
-  var freeze = new ArraySeq[ Boolean ](100)   
+  val backTrack = new ArraySeq[ ((Event, Event), List[Event]) ](100)
+  val freeze = new ArraySeq[ Boolean ](100)   
   val freezeSet = new HashSet[Integer]
   val alreadyExplored = new HashSet[(Event, Event)]
   var invariant : Queue[Event] = Queue()
   
+  val trace = new Queue[ Event ]
+  val nextTrace = new Queue[ Event ]
+  var parentEvent = getRootEvent
+  
   freeze.map { f => false }
   
   
-  def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = {
-
-    if (receiver == null) return true
-    
-    return sender match {
-      case null => 
-        isSystemMessage("deadletters", receiver.path.name)
-      case _ =>
-        isSystemMessage(sender.path.name, receiver.path.name)
-    }
-    
+  def getRootEvent : MsgEvent = {
+    var root = MsgEvent("null", "null", null, 0)
+    depMap.getOrElseUpdate(root, new HashMap[Event, Event])
+    return root
   }
   
+  
+  def isSystemCommunication(sender: ActorRef, receiver: ActorRef): Boolean = 
+  (receiver, sender) match {
+    case (null, _) => return true
+    case (_, null) => isSystemMessage("deadletters", receiver.path.name)
+    case _ => isSystemMessage(sender.path.name, receiver.path.name)
+  }
+
+  
   // Is this message a system message
-  def isSystemMessage(sender: String, receiver: String): Boolean = {
-    if ((actorNames contains sender) || (actorNames contains receiver)) {
-      return false
-    }
-    
-    return true
+  def isSystemMessage(sender: String, receiver: String): Boolean = 
+  ((actorNames contains sender) || (actorNames contains receiver)) match {
+    case true => return false
+    case _ => return true
   }
   
   
   // Notification that the system has been reset
-  def start_trace() : Unit = {
-    actorNames.clear
-  }
+  def start_trace() : Unit = actorNames.clear
   
   
   // When executing a trace, find the next trace event.
-  private[this] def mutable_trace_iterator(
-      trace: Queue[  Event ]) : Option[Event] = { 
-    
-    if(trace.isEmpty) return None
-    return Some(trace.dequeue)
+  def mutable_trace_iterator( trace: Queue[  Event ]) : Option[Event] =
+  trace.isEmpty match {
+    case true => return None
+    case _ => return Some(trace.dequeue)
   }
   
   
 
   // Get next message event from the trace.
-  def get_next_trace_message() : Option[MsgEvent] = {
-    mutable_trace_iterator(nextEvents) match {
-      case Some(v : MsgEvent) => Some(v)
-      case Some(v : Event) => get_next_trace_message()
-      case None => None
-    }
+  def get_next_trace_message() : Option[MsgEvent] =
+  mutable_trace_iterator(nextTrace) match {
+    case Some(v : MsgEvent) => Some(v)
+    case Some(v : Event) => get_next_trace_message()
+    case None => None
   }
+
   
   
   
@@ -197,7 +184,6 @@ class DPOR extends Scheduler with LazyLogging {
       
       case Some((next_event : MsgEvent, cell, env)) =>
         
-        
         invariant.headOption match {
           case Some(msg: MsgEvent) if (msg.id == next_event.id) => 
             logger.trace("Replaying a message " + invariant.head)
@@ -206,7 +192,7 @@ class DPOR extends Scheduler with LazyLogging {
         }
         
         trace += next_event
-        (g get next_event)
+        (depGraph get next_event)
         parentEvent = next_event
         return Some((cell, env))
         
@@ -218,7 +204,7 @@ class DPOR extends Scheduler with LazyLogging {
   
   // Get next event
   def next_event() : Event = {
-    mutable_trace_iterator(nextEvents) match {
+    mutable_trace_iterator(nextTrace) match {
       case Some(v) => v
       case None => throw new Exception("no previously consumed events")
     }
@@ -260,17 +246,11 @@ class DPOR extends Scheduler with LazyLogging {
     val msg = new MsgEvent(snd, rcv, envelope.message, 0)
     val msgs = pendingEvents.getOrElse(rcv, new Queue[(Event, ActorCell, Envelope)])
     
-    val parent = parentEvent match {
-      case null => 
-        val newMsg = MsgEvent("null", "null", null, 0)
-        dep.getOrElseUpdate(newMsg, new HashMap[Event, Event])
-        newMsg
-      case _ =>
-        parentEvent
-    }
+    val parent = parentEvent
+
     
     
-    val parentMap = dep.get(parent) match {
+    val parentMap = depMap.get(parent) match {
       case Some(x) => x
       case None => throw new Exception("no such parent")
     }
@@ -284,7 +264,7 @@ class DPOR extends Scheduler with LazyLogging {
             Console.YELLOW + "Not seen: " + newMsg.id + 
             " (" + newMsg.sender + " -> " + newMsg.receiver + ") " + Console.RESET)
             
-        dep(newMsg) = new HashMap[Event, Event]
+        depMap(newMsg) = new HashMap[Event, Event]
         parentMap(msg) = newMsg
         newMsg
       case _ => throw new Exception("wrong type")
@@ -305,33 +285,24 @@ class DPOR extends Scheduler with LazyLogging {
         event.id + 
         Console.RESET)
     
-    g.add(event)
+    depGraph.add(event)
     producedEvents.enqueue( event )
-    
-    if(parentEvent != null) {
-      g.addEdge(event, parentEvent)(DiEdge)
-    }
+
+    depGraph.addEdge(event, parentEvent)(DiEdge)
+
   }
   
   
   // Called before we start processing a newly received event
-  def before_receive(cell: ActorCell) {
-    //logger.trace(Console.GREEN 
-    //    + " ↓↓↓↓↓↓↓↓↓ ⌚  " + currentTime + " | " + cell.self.path.name + " ↓↓↓↓↓↓↓↓↓ " +
-    //    Console.RESET)
-  }
+  def before_receive(cell: ActorCell) {}
   
   
   // Called after receive is done being processed 
-  def after_receive(cell: ActorCell) {
-    //logger.trace(Console.RED 
-    //    + " ↑↑↑↑↑↑↑↑↑ ⌚  " + currentTime + " | " + cell.self.path.name + " ↑↑↑↑↑↑↑↑↑ " 
-    //    + Console.RESET)
-  }
+  def after_receive(cell: ActorCell) {}
   
 
   
-  def printPath(path : List[g.NodeT]) : String = {
+  def printPath(path : List[depGraph.NodeT]) : String = {
     var pathStr = ""
     for(node <- path) {
       node.value match {
@@ -346,9 +317,6 @@ class DPOR extends Scheduler with LazyLogging {
   
   
   def notify_quiescence() {
-    
-    //get_dot()
-    currentTime = 0
     
     var str1 = "trace: "
     for (item <- trace) {
@@ -369,25 +337,26 @@ class DPOR extends Scheduler with LazyLogging {
     interleavingCounter += 1
     
     // XXX: JUST A QUICK FIX. MAGIC NUMBER AHEAD.
-    nextEvents.clear()
-    nextEvents ++= consumedEvents.take(8)
+    nextTrace.clear()
+    nextTrace ++= consumedEvents.take(8)
     
-    for (e <- nextEvents) e match {
+    for (e <- nextTrace) e match {
       case m :MsgEvent => m.id = 0
       case _ =>
      }
 
-    nextEvents ++= nnnn.drop(1)
+    nextTrace ++= nnnn.drop(1)
     
     logger.debug(Console.BLUE + "Next trace:  " + 
-        Util.traceStr(nextEvents) + Console.RESET)
+        Util.traceStr(nextTrace) + Console.RESET)
     
     producedEvents.clear()
     consumedEvents.clear()
   
     trace.clear
     
-    parentEvent = null
+    parentEvent = getRootEvent
+
     pendingEvents.clear()
 
     instrumenter().await_enqueue()
@@ -410,7 +379,7 @@ class DPOR extends Scheduler with LazyLogging {
   def dpor() : Queue[Event] = {
     
     val root = getEvent(0)
-    val rootN = ( g get root )
+    val rootN = ( depGraph get root )
     
     val racingIndices = new HashSet[Integer]
     
@@ -423,8 +392,8 @@ class DPOR extends Scheduler with LazyLogging {
       
       alreadyExplored += ((earlier, later))
       
-      val earlierN = (g get earlier)
-      val laterN = (g get later)
+      val earlierN = (depGraph get earlier)
+      val laterN = (depGraph get later)
       
       val laterPath = laterN.pathTo( rootN ) match {
         case Some(path) => path.nodes.toList.reverse
@@ -469,20 +438,17 @@ class DPOR extends Scheduler with LazyLogging {
               
           freeze(commonAncestor) = true
           freezeSet += commonAncestor
-
   
           val racingPair = ((later, earlier))
           backTrack(commonAncestor) = (racingPair, values)
           
           racingIndices += commonAncestor
           
-          
         case (true, false) =>
           racingIndices += commonAncestor
           
-          
         case _ =>
-          logger.debug("\tAlready explored " + commonAncestor)
+          //logger.debug("\tAlready explored " + commonAncestor)
       }
 
     }
@@ -491,8 +457,8 @@ class DPOR extends Scheduler with LazyLogging {
       
     def isCoEnabeled(earlier: MsgEvent, later: MsgEvent) : Boolean = {
       
-      val earlierN = (g get earlier)
-      val laterN = (g get later)
+      val earlierN = (depGraph get earlier)
+      val laterN = (depGraph get later)
       
       val coEnabeled = laterN.pathTo(earlierN) match {
         case None => true
