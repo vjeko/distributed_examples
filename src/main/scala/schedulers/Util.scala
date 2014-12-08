@@ -105,8 +105,8 @@ object Util {
   
   def printQueue(queue: Queue[Event]) =
     for (e <- queue) e match {
-      case m :MsgEvent => println("\tMSG " + m.sender + " -> " + m.receiver + " " + m.msg)
-      case s: SpawnEvent => println("\tSPAWN " + s.name)
+      case m :MsgEvent => println("\t " + m.id + " " + m.sender + " -> " + m.receiver + " " + m.msg)
+      case s: SpawnEvent => println("\t " + s.id + " " + s.name)
     }
   
   

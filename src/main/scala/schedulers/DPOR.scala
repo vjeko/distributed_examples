@@ -94,12 +94,10 @@ class DPOR extends Scheduler with LazyLogging {
       case _ => throw new Exception("cannot find the first spawn")
     }
     
-    
-    nextTrace.dequeue() match {
+    nextTrace.head match {
       case firstMsg : MsgEvent => firstActor ! firstMsg.msg
       case _ => throw new Exception("cannot find the first message")
     }
-
   }
   
   
@@ -215,6 +213,7 @@ class DPOR extends Scheduler with LazyLogging {
       case _ => return None
     }
 
+    
   }
   
   
@@ -338,38 +337,26 @@ class DPOR extends Scheduler with LazyLogging {
   
   def notify_quiescence() {
     
-    var str1 = "trace: "
-    for (item <- currentTrace) {
-      item match {
-        case m : MsgEvent => str1 += m.id + " " 
-        case _ =>
-      }
-    }
-    
     logger.info("\n--------------------- Interleaving #" +
                 interleavingCounter + " ---------------------")
     
     logger.debug(Console.BLUE + "Current trace: " +
         Util.traceStr(currentTrace) + Console.RESET)
         
-    var nnnn = 
+    //Util.printQueue(currentTrace) 
 
-    interleavingCounter += 1
-    
-    // XXX: JUST A QUICK FIX. MAGIC NUMBER AHEAD.
-    nextTrace.clear()
-    
-    val firstSpawn = consumedEvents.find( x => x.isInstanceOf[SpawnEvent]) match{
+    val firstSpawn = consumedEvents.find( x => x.isInstanceOf[SpawnEvent]) match {
       case Some(s: SpawnEvent) => s
-      case _ => throw new Exception("internal error")
+      case _ => throw new Exception("first event not a spawn")
     }
     
+    nextTrace.clear()
     nextTrace += firstSpawn
-    nextTrace ++= dpor()
+    nextTrace ++= dpor(currentTrace)
     
     logger.debug(Console.BLUE + "Next trace:  " + 
         Util.traceStr(nextTrace) + Console.RESET)
-    
+        
     producedEvents.clear()
     consumedEvents.clear()
   
@@ -385,64 +372,102 @@ class DPOR extends Scheduler with LazyLogging {
   
   
   
-  def getEvent(index: Integer) : MsgEvent = {
-    currentTrace(index) match {
-      case eee : MsgEvent => eee
+  def getEvent(index: Integer, trace: Queue[Event]) : MsgEvent = {
+    trace(index) match {
+      case m : MsgEvent => m
       case _ => throw new Exception("internal error not a message")
     }
   }
 
   
   
-  def dpor() : Queue[Event] = {
+  def dpor(trace: Queue[Event]) : Queue[Event] = {
     
-    val root = getEvent(0)
+    interleavingCounter += 1
+    val root = getEvent(0, currentTrace)
     val rootN = ( depGraph get root )
     
     val racingIndices = new HashSet[Integer]
     
     
-    
-    def analyize_dep(earlierI: Integer, laterI: Integer) : Unit = {
+    /** Analyze the dependency between two events that are co-enabled
+     ** and have the same receiver.
+     * 
+     ** @param earleirI: Index of the earlier event.
+     ** @param laterI: Index of the later event.
+     ** @param trace: The trace to which the events belong to.
+     * 
+     ** @return none
+     */
+    def analyize_dep(earlierI: Int, laterI: Int, trace: Queue[Event]) :
+      Option[ (Int, List[Event]) ] = {
       
-      val earlier = getEvent(earlierI)
-      val later = getEvent(laterI)
+      // Retrieve the actual events.
+      val earlier = getEvent(earlierI, trace)
+      val later = getEvent(laterI, trace)
       
+      // See if this interleaving has been explored.
+      val explored = alreadyExplored.contains((later, earlier))
+      if (explored) return None
+      
+      // Since we're exploring an already executed trace, we can
+      // safely mark the interleaving of (earlier, later) as
+      // already explored.
       alreadyExplored += ((earlier, later))
       
+      // Get the actual nodes in the dependency graph that
+      // correspond to those events
       val earlierN = (depGraph get earlier)
       val laterN = (depGraph get later)
       
+      // Get the dependency path between later event and the
+      // root event (root node) in the system.
       val laterPath = laterN.pathTo( rootN ) match {
         case Some(path) => path.nodes.toList.reverse
         case None => throw new Exception("no such path")
       }
       
+      // Get the dependency path between earlier event and the
+      // root event (root node) in the system.
       val earlierPath = earlierN.pathTo( rootN ) match {
         case Some(path) => path.nodes.toList.reverse
         case None => throw new Exception("no such path")
       }
       
+      // Find the common prefix for the above paths.
       val commonPrefix = laterPath.intersect(earlierPath)
       
+      // Find the suffix for each path by taking the original
+      // path and subtracting the common prefix.
       val laterDiff = laterPath.diff(commonPrefix)
       val earlierDiff = earlierPath.diff(commonPrefix)
 
-      val needToReplay = 
-        earlierDiff.take(earlierDiff.size - 1) ++ laterDiff
+      // We need to replay the entirety of the later suffix except 
+      // for the last event, plus the entirety of the later suffix.
+      // This effectively swaps the earlier and the later event.
+      val needToReplay = earlierDiff.dropRight(1) ++ laterDiff 
       
+      // Figure out where in the provided trace this needs to be
+      // replayed. In other words, get the last element of the
+      // common prefix and figure out which index in the trace
+      // it corresponds to.
       val lastElement = commonPrefix.last
-      val commonAncestor = currentTrace.indexWhere { e => (e == lastElement.value) }
+      val branchI = trace.indexWhere { e => (e == lastElement.value) }
       
-      require(commonAncestor < laterI)
+      require(branchI < laterI)
       
-      val values = needToReplay.map(v => v.value)
+      // Since we're dealing with the vertices and not the
+      // events, we need to extract the values.
+      val needToReplayV = needToReplay.map(v => v.value)
       
-      val frozen = freezeSet contains commonAncestor
-      val explored = alreadyExplored.contains((later, earlier))
-      (frozen, explored) match {
+      // Debugging stuff...
+      racingIndices += branchI
+      
+      // If the freeze flag is not set on that index
+      // it means we can add it to the backtrack set 
+      freezeSet contains branchI match {
         
-        case (false, false) =>
+        case false =>
           logger.trace(Console.CYAN + "Earlier: " + 
               printPath(earlierPath) + Console.RESET)
           logger.trace(Console.CYAN + "Later:   " + 
@@ -451,27 +476,30 @@ class DPOR extends Scheduler with LazyLogging {
               printPath(needToReplay) + Console.RESET)
           logger.info(Console.GREEN + 
               "Found a race between " + earlier.id +  " and " + 
-              later.id + " with a common index " + commonAncestor +
+              later.id + " with a common index " + branchI +
               Console.RESET)
-              
+
+          return Some((branchI, needToReplayV))
           
-          val racingPair = ((later, earlier))
-          backTrack(commonAncestor) = (racingPair, values)
-          
-          freezeSet += commonAncestor
-          racingIndices += commonAncestor
-          
-        case (true, false) =>
-          racingIndices += commonAncestor
-          
-        case _ =>
-          //logger.debug("\tAlready explored " + commonAncestor)
+        case true => return None
       }
+
 
     }
     
     
-      
+    /** Figure out if two events are co-enabled.
+     *
+     * See if there is a path from the later event to the
+     * earlier event on the dependency graph. If such
+     * path does exist, this means that one event disables
+     * the other one.
+     * 
+     ** @param earlier: First event
+     ** @param earlier: First event
+     * 
+     ** @return: Boolean 
+     */
     def isCoEnabeled(earlier: MsgEvent, later: MsgEvent) : Boolean = {
       
       val earlierN = (depGraph get earlier)
@@ -486,50 +514,79 @@ class DPOR extends Scheduler with LazyLogging {
     }
     
 
-    
-    for(laterI <- 0 to currentTrace.size - 1) {
-      val later = getEvent(laterI)
+    /*
+     * For every event in the trace (called later),
+     * see if there is some earlier event, such that:
+     * 
+     * 0) They belong to the same receiver.
+     * 1) They are co-enabled.
+     * 2) Such interleaving hasn't been explored before.
+     * 3) There is not a freeze flag associated with their
+     *    common backtrack index.
+     */ 
+    for(laterI <- 0 to trace.size - 1) {
+      val later = getEvent(laterI, trace)
 
       for(earlierI <- 0 to laterI - 1) {
-        val earlier = getEvent(earlierI)
+        val earlier = getEvent(earlierI, trace)
         
         val sameReceiver = earlier.receiver == later.receiver
         if (sameReceiver && isCoEnabeled(earlier, later)) {
-          analyize_dep(earlierI, laterI)
+          analyize_dep(earlierI, laterI, trace) match {
+            
+            case Some((branchI, needToReplayV)) =>              
+              val racingPair = ((later, earlier))
+              backTrack(branchI) = (racingPair, needToReplayV)
+          
+              freezeSet += branchI
+              
+            case None => // Nothing
+          }
+          
         }
         
       }
     }
     
+    // If the backtrack set is empty, this means we're done.
     if (backTrack.isEmpty) {
       logger.info("Tutto finito!")
       System.exit(0);
     }
 
-    
+    // Find the deepest backtrack value, and make sure
+    // its index is removed from the freeze set.
     val maxIndex = backTrack.keySet.max
     freezeSet -= maxIndex
     
     val (first, second) = backTrack(maxIndex)._1 match {
       case (m1: MsgEvent, m2: MsgEvent) => (m1, m2)
-      case _ => throw new Exception("invalid interleaving events")
+      case _ => throw new Exception("invalid interleaving event types")
     }
     
-    logger.info(Console.RED + "Exploring a new message interleaving between " + 
+    logger.info(Console.RED + "Exploring a new message interleaving " + 
        first.id + " and " + second.id  + " at index " + maxIndex + Console.RESET)
     
     logger.debug("Unexplored indices: " + racingIndices)
     logger.debug("Frozen indices:     " + freezeSet)
     
     val ((e1, e2), replayThis) = backTrack(maxIndex)
-    invariant = Queue(e1, e2)
     
+    /*
+     * Mark the new interleaving as explored.
+     * XXX: Not sure if this is the correct behavior. If the replay
+     *      diverges and is unable to replay both events, do we still
+     *      mark them as explored?
+     */
     alreadyExplored += ((e1, e2))
     
-    backTrack -= maxIndex
-    val result =  currentTrace.take(maxIndex + 1) ++ replayThis
-
-    return result
+    // A variable used to figure out if the replay diverged.
+    invariant = Queue(e1, e2)
+    
+    // Return all events up to the backtrack index we're interested in
+    // and slap on it a new set of events that need to be replayed in
+    // order to explore that interleaving.
+    return trace.take(maxIndex + 1) ++ replayThis
     
   }
   
