@@ -233,7 +233,6 @@ class Instrumenter {
     // running?). If not then dispatch the current message and start the loop.
     if (!started.get) {
       started.set(true)
-      scheduler.event_consumed(cell, envelope)
       dispatch_next_message()
       return false
     }

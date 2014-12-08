@@ -102,6 +102,15 @@ object Util {
 
   
   
+  
+  def printQueue(queue: Queue[Event]) =
+    for (e <- queue) e match {
+      case m :MsgEvent => println("\tMSG " + m.sender + " -> " + m.receiver + " " + m.msg)
+      case s: SpawnEvent => println("\tSPAWN " + s.name)
+    }
+  
+  
+  
   def urlses(cl: ClassLoader): Array[java.net.URL] = cl match {
     case null => Array()
     case u: java.net.URLClassLoader => u.getURLs() ++ urlses(cl.getParent)

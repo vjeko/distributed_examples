@@ -189,6 +189,7 @@ class DPOR extends Scheduler with LazyLogging {
           case _ =>
         }
         
+        println("currentTrace " + currentTrace.size + " " + next_event.sender + " -> " + next_event.receiver)
         currentTrace += next_event
         (depGraph get next_event)
         parentEvent = next_event
@@ -210,7 +211,7 @@ class DPOR extends Scheduler with LazyLogging {
   
 
   // Record that an event was consumed
-  def event_consumed(event: Event) = {
+  def event_consumed(event: Event) = { 
     consumedEvents.enqueue( event )
   }
   
@@ -234,6 +235,7 @@ class DPOR extends Scheduler with LazyLogging {
     
     producedEvents.enqueue( event )
   }
+  
   
   
   def getMessage(cell: ActorCell, envelope: Envelope) : MsgEvent = {
@@ -310,7 +312,6 @@ class DPOR extends Scheduler with LazyLogging {
     }
     return pathStr
   }
-  
 
   
   
@@ -330,20 +331,20 @@ class DPOR extends Scheduler with LazyLogging {
     logger.debug(Console.BLUE + "Current trace: " +
         Util.traceStr(currentTrace) + Console.RESET)
         
-    var nnnn = dpor()
+    var nnnn = 
 
     interleavingCounter += 1
     
     // XXX: JUST A QUICK FIX. MAGIC NUMBER AHEAD.
     nextTrace.clear()
-    nextTrace ++= consumedEvents.take(8)
     
-    for (e <- nextTrace) e match {
-      case m :MsgEvent => m.id = 0
-      case _ =>
-     }
-
-    nextTrace ++= nnnn.drop(1)
+    val firstSpawn = consumedEvents.find( x => x.isInstanceOf[SpawnEvent]) match{
+      case Some(s: SpawnEvent) => s
+      case _ => throw new Exception("internal error")
+    }
+    
+    nextTrace += firstSpawn 
+    nextTrace ++= dpor()
     
     logger.debug(Console.BLUE + "Next trace:  " + 
         Util.traceStr(nextTrace) + Console.RESET)
@@ -414,7 +415,7 @@ class DPOR extends Scheduler with LazyLogging {
       val lastElement = commonPrefix.last
       val commonAncestor = currentTrace.indexWhere { e => (e == lastElement.value) }
       
-      require(commonAncestor > -1 && commonAncestor < laterI)
+      require(commonAncestor < laterI)
       
       val values = needToReplay.map(v => v.value)
       
