@@ -29,7 +29,7 @@ import com.typesafe.scalalogging.LazyLogging,
        ch.qos.logback.classic.Logger
 
 
-// A basic scheduler
+// DPOR scheduler.
 class DPOR extends Scheduler with LazyLogging {
   
   var instrumenter = Instrumenter
