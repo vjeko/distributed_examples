@@ -33,6 +33,7 @@ import com.typesafe.scalalogging.LazyLogging,
 class DPOR extends Scheduler with LazyLogging {
   
   var instrumenter = Instrumenter
+  var started = false
   
   var currentTime = 0
   var interleavingCounter = 0
@@ -82,7 +83,24 @@ class DPOR extends Scheduler with LazyLogging {
   
   
   // Notification that the system has been reset
-  def start_trace() : Unit = actorNames.clear
+  def start_trace() : Unit = {
+    
+    started = false
+    actorNames.clear
+    
+    val firstActor = nextTrace.dequeue() match {
+      case firstSpawn : SpawnEvent => 
+        instrumenter().actorSystem().actorOf(firstSpawn.props, firstSpawn.name)
+      case _ => throw new Exception("cannot find the first spawn")
+    }
+    
+    
+    nextTrace.dequeue() match {
+      case firstMsg : MsgEvent => firstActor ! firstMsg.msg
+      case _ => throw new Exception("cannot find the first message")
+    }
+
+  }
   
   
   // When executing a trace, find the next trace event.
@@ -184,12 +202,11 @@ class DPOR extends Scheduler with LazyLogging {
         
         invariant.headOption match {
           case Some(msg: MsgEvent) if (msg.id == next_event.id) => 
-            logger.trace("Replaying a message " + invariant.head)
+            logger.trace("Replaying message event " + msg.id)
             invariant.dequeue()
           case _ =>
         }
         
-        println("currentTrace " + currentTrace.size + " " + next_event.sender + " -> " + next_event.receiver)
         currentTrace += next_event
         (depGraph get next_event)
         parentEvent = next_event
@@ -290,6 +307,10 @@ class DPOR extends Scheduler with LazyLogging {
 
     depGraph.addEdge(event, parentEvent)(DiEdge)
 
+    if (!started) {
+      started = true
+      instrumenter().start_dispatch()
+    }
   }
   
   
@@ -343,7 +364,7 @@ class DPOR extends Scheduler with LazyLogging {
       case _ => throw new Exception("internal error")
     }
     
-    nextTrace += firstSpawn 
+    nextTrace += firstSpawn
     nextTrace ++= dpor()
     
     logger.debug(Console.BLUE + "Next trace:  " + 
@@ -360,8 +381,6 @@ class DPOR extends Scheduler with LazyLogging {
 
     instrumenter().await_enqueue()
     instrumenter().restart_system()
-
-
   }
   
   
@@ -491,8 +510,13 @@ class DPOR extends Scheduler with LazyLogging {
     val maxIndex = backTrack.keySet.max
     freezeSet -= maxIndex
     
-    logger.info(Console.RED + "Exploring a new message interleaving -> " + 
-        backTrack(maxIndex)._1 + " at index " + maxIndex + Console.RESET)
+    val (first, second) = backTrack(maxIndex)._1 match {
+      case (m1: MsgEvent, m2: MsgEvent) => (m1, m2)
+      case _ => throw new Exception("invalid interleaving events")
+    }
+    
+    logger.info(Console.RED + "Exploring a new message interleaving between " + 
+       first.id + " and " + second.id  + " at index " + maxIndex + Console.RESET)
     
     logger.debug("Unexplored indices: " + racingIndices)
     logger.debug("Frozen indices:     " + freezeSet)
