@@ -11,6 +11,7 @@ case class RB_Broadcast(msg: DataMessage)
 case class BEB_Broadcast(msg: DataMessage)
 case class BEB_Deliver(msg: DataMessage)
 
+
 class FireStarter(_system: ActorSystem) extends Actor {
 
   def receive = {
@@ -20,7 +21,7 @@ class FireStarter(_system: ActorSystem) extends Actor {
   def start() = {
     val system = context.system;
 
-    val names = List.range(0, 8).map(i => "I-" + i.toString())
+    val names = List.range(0, 3).map(i => "I-" + i.toString())
     val nodes = names.map(i => system.actorOf(Props[Node], name = i))
 
     nodes.map(node => node ! Init(names.toSet))

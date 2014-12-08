@@ -47,17 +47,15 @@ class DPOR extends Scheduler with LazyLogging {
   val depGraph = Graph[Event, DiEdge]()
   var depMap = new HashMap[Event, HashMap[Event, Event]]
   
-  val backTrack = new ArraySeq[ ((Event, Event), List[Event]) ](100)
-  val freeze = new ArraySeq[ Boolean ](100)   
+  //val backTrack = new ArraySeq[ ((Event, Event), List[Event]) ](100)
+  val backTrack = new HashMap[Int, ((Event, Event), List[Event]) ] 
   val freezeSet = new HashSet[Integer]
   val alreadyExplored = new HashSet[(Event, Event)]
   var invariant : Queue[Event] = Queue()
   
-  val trace = new Queue[ Event ]
+  val currentTrace = new Queue[ Event ]
   val nextTrace = new Queue[ Event ]
   var parentEvent = getRootEvent
-  
-  freeze.map { f => false }
   
   
   def getRootEvent : MsgEvent = {
@@ -191,7 +189,7 @@ class DPOR extends Scheduler with LazyLogging {
           case _ =>
         }
         
-        trace += next_event
+        currentTrace += next_event
         (depGraph get next_event)
         parentEvent = next_event
         return Some((cell, env))
@@ -319,7 +317,7 @@ class DPOR extends Scheduler with LazyLogging {
   def notify_quiescence() {
     
     var str1 = "trace: "
-    for (item <- trace) {
+    for (item <- currentTrace) {
       item match {
         case m : MsgEvent => str1 += m.id + " " 
         case _ =>
@@ -330,7 +328,7 @@ class DPOR extends Scheduler with LazyLogging {
                 interleavingCounter + " ---------------------")
     
     logger.debug(Console.BLUE + "Current trace: " +
-        Util.traceStr(trace) + Console.RESET)
+        Util.traceStr(currentTrace) + Console.RESET)
         
     var nnnn = dpor()
 
@@ -353,7 +351,7 @@ class DPOR extends Scheduler with LazyLogging {
     producedEvents.clear()
     consumedEvents.clear()
   
-    trace.clear
+    currentTrace.clear
     
     parentEvent = getRootEvent
 
@@ -368,7 +366,7 @@ class DPOR extends Scheduler with LazyLogging {
   
   
   def getEvent(index: Integer) : MsgEvent = {
-    trace(index) match {
+    currentTrace(index) match {
       case eee : MsgEvent => eee
       case _ => throw new Exception("internal error not a message")
     }
@@ -414,13 +412,13 @@ class DPOR extends Scheduler with LazyLogging {
         earlierDiff.take(earlierDiff.size - 1) ++ laterDiff
       
       val lastElement = commonPrefix.last
-      val commonAncestor = trace.indexWhere { e => (e == lastElement.value) }
+      val commonAncestor = currentTrace.indexWhere { e => (e == lastElement.value) }
       
       require(commonAncestor > -1 && commonAncestor < laterI)
       
       val values = needToReplay.map(v => v.value)
       
-      val frozen = freeze(commonAncestor)
+      val frozen = freezeSet contains commonAncestor
       val explored = alreadyExplored.contains((later, earlier))
       (frozen, explored) match {
         
@@ -436,12 +434,11 @@ class DPOR extends Scheduler with LazyLogging {
               later.id + " with a common index " + commonAncestor +
               Console.RESET)
               
-          freeze(commonAncestor) = true
-          freezeSet += commonAncestor
-  
+          
           val racingPair = ((later, earlier))
           backTrack(commonAncestor) = (racingPair, values)
           
+          freezeSet += commonAncestor
           racingIndices += commonAncestor
           
         case (true, false) =>
@@ -469,9 +466,8 @@ class DPOR extends Scheduler with LazyLogging {
     }
     
 
-    //require(invariant.isEmpty)
     
-    for(laterI <- 0 to trace.size - 1) {
+    for(laterI <- 0 to currentTrace.size - 1) {
       val later = getEvent(laterI)
 
       for(earlierI <- 0 to laterI - 1) {
@@ -485,21 +481,13 @@ class DPOR extends Scheduler with LazyLogging {
       }
     }
     
-    
-    var maxIndex = -1
-    for(i <- Range(0, backTrack.size -1)) {
-      if (backTrack(i) != null) {
-        maxIndex = i
-      }
-    }
-    
-    if (maxIndex == -1) {
+    if (backTrack.isEmpty) {
       logger.info("Tutto finito!")
-      System.exit(0)
+      System.exit(0);
     }
+
     
-    require(freeze(maxIndex) == true)
-    freeze(maxIndex) = false
+    val maxIndex = backTrack.keySet.max
     freezeSet -= maxIndex
     
     logger.info(Console.RED + "Exploring a new message interleaving -> " + 
@@ -513,8 +501,9 @@ class DPOR extends Scheduler with LazyLogging {
     
     alreadyExplored += ((e1, e2))
     
-    val result =  trace.take(maxIndex + 1) ++ replayThis
-    backTrack(maxIndex) = null
+    backTrack -= maxIndex
+    val result =  currentTrace.take(maxIndex + 1) ++ replayThis
+
     return result
     
   }
