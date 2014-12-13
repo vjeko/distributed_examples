@@ -70,18 +70,19 @@ class Node extends Actor {
   var delivered: DeliveredT = Set()
 
   def rb_bradcast(msg: DataMessage) {
-    //println("rb_bradcast")
+    println("rb_bradcast")
     if (!started) {
-      //println("not started")
+      println("not started")
     }
     
     beb_broadcast(msg)
   }
 
   def beb_broadcast(msg: DataMessage) {
-    //println("beb_broadcast")
+    delivered = delivered + msg
+    println("beb_broadcast")
     if (!started) {
-      //println("not started")
+      println("not started")
     }
     
     allActors.map(node => node ! BEB_Deliver(msg))
@@ -89,31 +90,30 @@ class Node extends Actor {
 
   def rb_deliver(msg: DataMessage) {
     if (!started) {
-      //println("not started")
+      println("not started")
     }
-    //println(self.path.name + " reliably delivered a broadcast mesage " + msg)
+    println(self.path.name + " reliably delivered a broadcast mesage " + msg)
   }
 
   def beb_deliver(msg: DataMessage) {
 
     if (!started) {
-      //println("not started")
+      println("not started")
     }
     
     if (delivered contains msg) {
       return
     }
 
-    delivered = delivered + msg
     rb_deliver(msg)
     beb_broadcast(msg)
   }
   
 
   def init(names: Set[String]) {
-    //println("init " + self.path.name)
+    println("init " + self.path.name)
     started = true
-    //println("Initializing actor " + self.path.name)
+    println("Initializing actor " + self.path.name)
     allActors = names.map(i => context.actorFor("../" + i))
   }
   
