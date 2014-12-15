@@ -63,16 +63,17 @@ class FireStarter(_system: ActorSystem) extends Actor {
 class Node extends Actor {
   type NodeSetT = Set[ActorRef]
   type DeliveredT = Set[DataMessage]
-
+  
+  val me = self.path.name
   var started = false
   
   var allActors: NodeSetT = Set()
   var delivered: DeliveredT = Set()
 
   def rb_bradcast(msg: DataMessage) {
-    println("rb_bradcast")
+    println(me + " is doing a reliable broadcast.")
     if (!started) {
-      println("not started")
+      println("Not started!")
     }
     
     beb_broadcast(msg)
@@ -80,7 +81,7 @@ class Node extends Actor {
 
   def beb_broadcast(msg: DataMessage) {
     delivered = delivered + msg
-    println("beb_broadcast")
+    println(me + " is doing a best effort broadcast.")
     if (!started) {
       println("not started")
     }
@@ -90,15 +91,15 @@ class Node extends Actor {
 
   def rb_deliver(msg: DataMessage) {
     if (!started) {
-      println("not started")
+      println(me + " is not Started!")
     }
-    println(self.path.name + " reliably delivered a broadcast mesage " + msg)
+    println(me + " reliably delivered a broadcast mesage " + msg)
   }
 
   def beb_deliver(msg: DataMessage) {
 
     if (!started) {
-      println("not started")
+      println(me + " is not Started!")
     }
     
     if (delivered contains msg) {
@@ -111,9 +112,8 @@ class Node extends Actor {
   
 
   def init(names: Set[String]) {
-    println("init " + self.path.name)
     started = true
-    println("Initializing actor " + self.path.name)
+    println(me + " is being intialized.")
     allActors = names.map(i => context.actorFor("../" + i))
   }
   
@@ -124,6 +124,6 @@ class Node extends Actor {
     case Stop => context.stop(self)
     case RB_Broadcast(msg) => rb_bradcast(msg)
     case BEB_Deliver(msg) => beb_deliver(msg)
-    case _ => println("Unknown message")
+    case _ => println(me + " received an unknown message")
   }
 }
