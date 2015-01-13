@@ -3,6 +3,7 @@ package broadcast;
 import akka.actor.{ Actor, ActorRef, DeadLetter }
 import akka.actor.ActorSystem
 import akka.actor.Props
+import akka.dispatch.verification.NodesUnreachable
 
 case class Stop()
 case class Init(msg: Set[String])
@@ -12,25 +13,25 @@ case class BEB_Broadcast(msg: DataMessage)
 case class BEB_Deliver(msg: DataMessage)
 
 
-class FireStarter(_system: ActorSystem) extends Actor {
+class NodeTest extends Actor {
+  type NodeSetT = Set[ActorRef]
+  type DeliveredT = Set[DataMessage]
+  
+  val me = self.path.name
+  var started = false
+  
+  var allActors: NodeSetT = Set()
+  var delivered: DeliveredT = Set()
+  
 
   def receive = {
-    case _ => start()
-  }
-
-  def start() = {
-    val system = context.system;
-
-    val names = List.range(0, 3).map(i => "I-" + i.toString())
-    val nodes = names.map(i => system.actorOf(Props[Node], name = i))
-
-    nodes.map(node => node ! Init(names.toSet))
-    nodes.map(node => system.eventStream.subscribe(node, classOf[DeadLetter]))
-
-    nodes(0) ! RB_Broadcast(DataMessage(1, "Message"))
-
+    case d: DeadLetter => allActors = allActors - d.recipient
+    case msg @ DataMessage => println(me + " DataMessage: " + msg)
+    case NodesUnreachable(nodes) => println(me + " NodesUnreachable: " + nodes)
+    case _ => println(me + " received an unknown message")
   }
 }
+
 /**
  *
  * Local sending will just pass a reference to the
