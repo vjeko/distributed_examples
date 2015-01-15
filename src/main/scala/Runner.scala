@@ -21,7 +21,7 @@ import scala.collection.immutable.Vector
 
 import akka.dispatch.verification.NetworkPartition
 
-object Main2 {
+object Main2 extends App {
 
   val scheduler = new DPOR
   Instrumenter().scheduler = scheduler
@@ -44,7 +44,7 @@ object Main2 {
 }
 
 
-object Main extends App {
+object Main {
 
   val scheduler = new DPOR
   Instrumenter().scheduler = scheduler
