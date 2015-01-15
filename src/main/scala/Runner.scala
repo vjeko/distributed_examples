@@ -32,9 +32,13 @@ object Main2 {
   val spawns = names.map(i => Start(Props[Node], name = i))
   val inits = names.map(name => Send(name, Init(names.toSet)))
   val rb = Send(names(0), RB_Broadcast(DataMessage(1, "Message")))
-      
+  
+  val a = Set(names(0))
+  val b = Set(names(1), names(2))
+  val par = NetworkPartition(a, b)
+  
   val externalEvents : Vector[ExternalEvent] = Vector() ++
-    spawns ++ inits :+ rb
+    spawns ++ inits :+ rb :+ par
   
   scheduler.run(externalEvents)
 }

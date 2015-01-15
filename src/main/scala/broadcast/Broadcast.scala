@@ -25,10 +25,12 @@ class NodeTest extends Actor {
   
 
   def receive = {
-    case d: DeadLetter => allActors = allActors - d.recipient
-    case msg @ DataMessage => println(me + " DataMessage: " + msg)
+    case d: DeadLetter =>
+      println("DeadLetter")
+      allActors = allActors - d.recipient
+    case msg @ DataMessage(_, _) => println(me + " DataMessage: " + msg)
     case NodesUnreachable(nodes) => println(me + " NodesUnreachable: " + nodes)
-    case _ => println(me + " received an unknown message")
+    case other => println(me + " received an unknown message " + other)
   }
 }
 
