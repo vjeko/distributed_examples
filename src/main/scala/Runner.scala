@@ -15,7 +15,7 @@ import akka.dispatch.verification.Instrumenter,
        akka.dispatch.verification.ExternalEvent,
        akka.dispatch.verification.Start,
        akka.dispatch.verification.Send,
-       akka.dispatch.verification.DPOR
+       akka.dispatch.verification.DPORwFailures
 
 import scala.collection.immutable.Vector
 
@@ -23,7 +23,7 @@ import akka.dispatch.verification.NetworkPartition
 
 object Main {
 
-  val scheduler = new DPOR
+  val scheduler = new DPORwFailures
   Instrumenter().scheduler = scheduler
   Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait
   
@@ -46,7 +46,7 @@ object Main {
 
 object Main2 extends App {
 
-  val scheduler = new DPOR
+  val scheduler = new DPORwFailures
   Instrumenter().scheduler = scheduler
   Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait
   
