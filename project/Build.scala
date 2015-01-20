@@ -17,10 +17,13 @@ object ConcurrencyeBuild extends Build {
       scalaVersion := "2.11.4",
 
       libraryDependencies += "com.typesafe.akka" %% "akka-actor" % "2.3.6",
+      libraryDependencies += "com.typesafe.akka" %% "akka-cluster" % "2.3.6",
       libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
       libraryDependencies += "org.slf4j" % "slf4j-api" % "1.7.7",
       libraryDependencies += "org.slf4j" % "log4j-over-slf4j" % "1.7.7",
       libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.1.2",
+      libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.3",
+      libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
       libraryDependencies += "com.assembla.scala-incubator" %% "graph-core" % "1.9.0",
       libraryDependencies += "com.assembla.scala-incubator" %% "graph-dot" % "1.9.0",
 
