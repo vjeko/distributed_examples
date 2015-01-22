@@ -113,11 +113,22 @@ class Node extends Actor {
     beb_broadcast(msg)
   }
   
+  
+  def strToActor(str: String) : ActorRef = {
+    return context.actorFor("../" + str)
+  }
+  
 
   def init(names: Set[String]) {
     started = true
     println(me + " is being intialized.")
-    allActors = names.map(i => context.actorFor("../" + i))
+    allActors = names.map(name => strToActor(name))
+  }
+  
+  
+  def removeNodes(nodes: Set[String]) : Unit = {
+    println(me + " NodesUnreachable: " + nodes)
+    allActors --= nodes.map(x => strToActor(x))
   }
   
 
@@ -127,6 +138,7 @@ class Node extends Actor {
     case Stop => context.stop(self)
     case RB_Broadcast(msg) => rb_bradcast(msg)
     case BEB_Deliver(msg) => beb_deliver(msg)
+    case NodesUnreachable(nodes) => removeNodes(nodes)
     case _ => println(me + " received an unknown message")
   }
 }
