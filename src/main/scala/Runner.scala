@@ -30,7 +30,8 @@ class ResultAggregator {
   }
 }
 
-object Main extends App {
+object Main extends App
+{
 
   val scheduler = new DPORwFailures
   Instrumenter().scheduler = scheduler
@@ -48,13 +49,14 @@ object Main extends App {
   val par = NetworkPartition(a, b)
   
   val externalEvents : Vector[ExternalEvent] = Vector() ++
-    spawns ++ inits :+ rb0 :+ rb1 :+ par
+    spawns ++ inits :+ rb0  :+ rb1 :+ par//
   
   scheduler.run(externalEvents)
 }
 
 
-object Simple {
+object Simple// extends App
+{
 
   val scheduler = new DPORwFailures
   Instrumenter().scheduler = scheduler
