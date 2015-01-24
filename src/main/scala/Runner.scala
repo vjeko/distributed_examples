@@ -18,22 +18,86 @@ import akka.dispatch.verification.Instrumenter,
        akka.dispatch.verification.DPORwFailures,
        akka.dispatch.verification.Unique
 
-import scala.collection.immutable.Vector
+import scala.collection.immutable.Vector,
+       scala.collection.mutable.Queue
 
-import scala.collection.mutable.Queue
+import akka.dispatch.verification.NetworkPartition,
+       akka.dispatch.verification.Scheduler,
+       akka.dispatch.verification.Util
 
-import akka.dispatch.verification.NetworkPartition
+import java.io._
+
+
+
+
 
 class ResultAggregator {
-  def collect(trace: Queue[Unique]) : Unit = {
+  
+  val traceFN = "trace.txt"
+  val typeFN = "types.txt"
+  val graphFN = "graph.txt"
+  
+  write(traceFN, "")
+  write(typeFN, "")
+  write(graphFN, "")
+  
+  val traces : Queue[Array[Unique]] = new Queue()
+  val traceLog = new java.io.PrintWriter(new FileWriter(traceFN, true))
+  val typeLog = new java.io.PrintWriter(new FileWriter(typeFN, true))
+  val graphLog = new java.io.PrintWriter(new FileWriter(graphFN, true))
+
+  
+  def write(name: String, content: String) {
+    val writer = new java.io.PrintWriter(name);
+    writer.print(content);
+    writer.close();
+  }
+  
+  
+  def dumpTraces() {
     
+    for (trace <- traces) {
+      var line = ""
+      trace.foreach( e => line ++= e.id + " ")
+      traceLog.println(line)
+    }
+    
+    traces.clear()
+  }
+  
+  
+  def collect(trace: Queue[Unique]) : Unit = {
+    traces.enqueue( trace.clone().toArray )
+    
+    if (traces.size < 500) return
+    dumpTraces()
+  }
+  
+  
+  def done(scheduler: Scheduler) : Unit = {
+    dumpTraces()
+    
+    val dpor = scheduler.asInstanceOf[DPORwFailures]
+    for(node <- dpor.depGraph.nodes) {
+      typeLog.println(node.value.id + " " + node.value)
+    }
+    
+    graphLog.print( Util.getDot(dpor.depGraph) )
+    
+    
+    typeLog.close()
+    traceLog.close()
+    graphLog.close()
   }
 }
 
-object Main extends App
+
+
+object Main// extends App
 {
 
   val scheduler = new DPORwFailures
+  
   Instrumenter().scheduler = scheduler
   Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait
   
@@ -50,12 +114,16 @@ object Main extends App
   
   val externalEvents : Vector[ExternalEvent] = Vector() ++
     spawns ++ inits :+ rb0  :+ rb1 :+ par//
-  
-  scheduler.run(externalEvents)
+ 
+  val collector = new ResultAggregator
+  scheduler.run(
+      externalEvents, 
+      collector.collect, 
+      collector.done)
 }
 
 
-object Simple// extends App
+object Simple extends App
 {
 
   val scheduler = new DPORwFailures
@@ -76,6 +144,10 @@ object Simple// extends App
   
   val externalEvents : Vector[ExternalEvent] = Vector() ++
     spawns :+ rb0 :+ rb1 :+ rb2 :+ rb3 :+ par
-  
-  scheduler.run(externalEvents)
+    
+  val collector = new ResultAggregator
+    scheduler.run(
+      externalEvents, 
+      collector.collect, 
+      collector.done)
 }
