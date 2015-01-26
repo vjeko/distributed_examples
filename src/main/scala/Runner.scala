@@ -93,7 +93,7 @@ class ResultAggregator {
 
 
 
-object Main// extends App
+object Main extends App
 {
 
   val scheduler = new DPORwFailures
@@ -123,7 +123,7 @@ object Main// extends App
 }
 
 
-object Simple extends App
+object Simple// extends App
 {
 
   val scheduler = new DPORwFailures
