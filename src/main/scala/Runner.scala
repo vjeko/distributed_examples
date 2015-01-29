@@ -84,7 +84,6 @@ class ResultAggregator {
     
     graphLog.print( Util.getDot(dpor.depGraph) )
     
-    
     typeLog.close()
     traceLog.close()
     graphLog.close()
@@ -105,7 +104,8 @@ object Main extends App
   
   val spawns = names.map(i => Start(Props[Node], name = i))
   val inits = names.map(name => Send(name, Init(names.toSet)))
-  val rb0 = Send(names(0), RB_Broadcast(DataMessage(1, "Message0")))
+  
+  val rb0 = Send(names(0), RB_Broadcast(DataMessage(0, "Message0")))
   val rb1 = Send(names(0), RB_Broadcast(DataMessage(1, "Message1")))
   
   val a = Set(names(0))
@@ -113,7 +113,7 @@ object Main extends App
   val par = NetworkPartition(a, b)
   
   val externalEvents : Vector[ExternalEvent] = Vector() ++
-    spawns ++ inits :+ rb0  :+ rb1 :+ par//
+    spawns ++ inits :+ rb0 :+ par//
  
   val collector = new ResultAggregator
   scheduler.run(
