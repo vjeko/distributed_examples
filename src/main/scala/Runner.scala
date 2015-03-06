@@ -5,6 +5,8 @@ import broadcast.Node,
        broadcast.RB_Broadcast,
        broadcast.DataMessage
 
+import pastry._
+
 import akka.actor.Actor,
        akka.actor.ActorRef,
        akka.actor.DeadLetter,
@@ -27,7 +29,14 @@ import akka.dispatch.verification.NetworkPartition,
 
 import java.io._
 
+import akka.actor.Actor,
+       akka.actor.ActorRef,
+       akka.actor.DeadLetter,
+       akka.actor.ActorSystem,
+       akka.actor.Props
 
+import org.slf4j.LoggerFactory,
+       com.typesafe.scalalogging.Logger
 
 
 
@@ -92,30 +101,28 @@ class ResultAggregator {
 
 
 
-object Main extends App
+object PastryBug extends App with Config
 {
-
+  val collector = new ResultAggregator
   val scheduler = new DPORwFailures
   
   Instrumenter().scheduler = scheduler
   Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait
   
-  val names = List.range(0, 3).map(i => "A-" + i.toString())
+  val logger = Logger(LoggerFactory.getLogger("pastry"))
+  val system = ActorSystem("pastry")
   
-  val spawns = names.map(i => Start(Props[Node], name = i))
-  val inits = names.map(name => Send(name, Init(names.toSet)))
+  val bootstrapID : BigInt = 54615
+  val bootstrapSpawn = Start(Props[Node], name = toBase(bootstrapID))
+  val bootstrapInit = Send(toBase(bootstrapID), Bootstrap(bootstrapID, bootstrapID))
   
-  val rb0 = Send(names(0), RB_Broadcast(DataMessage(0, "Message0")))
-  val rb1 = Send(names(0), RB_Broadcast(DataMessage(1, "Message1")))
-  
-  val a = Set(names(0))
-  val b = Set(names(1), names(2))
-  val par = NetworkPartition(a, b)
-  
-  val externalEvents : Vector[ExternalEvent] = Vector() ++
-    spawns ++ inits :+ rb0 :+ par//
- 
-  val collector = new ResultAggregator
+  val otherIDs : List[BigInt] = List(1, 3, 1234599, 5423)
+  val otherSpawns = otherIDs.map(i => Start(Props[Node], toBase(i)))
+  val otherInits = otherIDs.map(id => Send(toBase(id), Bootstrap(id, bootstrapID)))
+
+  val externalEvents : Vector[ExternalEvent] = (Vector() :+
+    bootstrapSpawn :+ bootstrapInit) ++ otherSpawns ++ otherInits
+    
   scheduler.run(
       externalEvents, 
       collector.collect, 

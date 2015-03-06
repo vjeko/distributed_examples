@@ -16,6 +16,7 @@ object ConcurrencyeBuild extends Build {
       version := "0.1",
       scalaVersion := "2.11.4",
 
+      libraryDependencies += "org.spire-math" %% "spire" % "0.9.0",
       libraryDependencies += "com.typesafe.akka" %% "akka-actor" % "2.3.6",
       libraryDependencies += "com.typesafe.akka" %% "akka-cluster" % "2.3.6",
       libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
