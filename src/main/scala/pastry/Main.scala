@@ -9,7 +9,9 @@ import akka.actor.Actor,
 import org.slf4j.LoggerFactory,
        com.typesafe.scalalogging.Logger
 
-object Main extends App with Config {
+object PastryTest extends Config
+//with App 
+{
   val logger = Logger(LoggerFactory.getLogger("pastry"))
   val system = ActorSystem("pastry")
   
@@ -25,11 +27,11 @@ object Main extends App with Config {
       name = toBase(id)))
       
       
-  nodes(0) ! Bootstrap(bootstrapID)
+  nodes(0) ! Bootstrap(bootstrapID, bootstrapID)
   Thread.sleep(100)
-  nodes(1) ! Bootstrap(bootstrapID)
+  nodes(1) ! Bootstrap(IDs(1), bootstrapID)
   Thread.sleep(100)
-  nodes(2) ! Bootstrap(bootstrapID)
+  nodes(2) ! Bootstrap(IDs(2), bootstrapID)
   Thread.sleep(100)
 
   nodes(0) ! Write(1212, 1234)

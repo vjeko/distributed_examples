@@ -114,11 +114,11 @@ object PastryBug extends App with Config
   
   val bootstrapID : BigInt = 54615
   val bootstrapSpawn = Start(Props[Node], name = toBase(bootstrapID))
-  val bootstrapInit = Send(toBase(bootstrapID), Bootstrap(bootstrapID, bootstrapID))
+  val bootstrapInit = Send(toBase(bootstrapID), () => Bootstrap(bootstrapID, bootstrapID))
   
   val otherIDs : List[BigInt] = List(1, 3, 1234599, 5423)
   val otherSpawns = otherIDs.map(i => Start(Props[Node], toBase(i)))
-  val otherInits = otherIDs.map(id => Send(toBase(id), Bootstrap(id, bootstrapID)))
+  val otherInits = otherIDs.map(id => Send(toBase(id), () => Bootstrap(id, bootstrapID)))
 
   val externalEvents : Vector[ExternalEvent] = (Vector() :+
     bootstrapSpawn :+ bootstrapInit) ++ otherSpawns ++ otherInits
@@ -140,10 +140,10 @@ object Simple// extends App
   val names = List.range(0, 3).map(i => "A-" + i.toString())
   
   val spawns = names.map(i => Start(Props[NodeTest], name = i))
-  val rb0 = Send(names(0), DataMessage(1, "Message"))
-  val rb1 = Send(names(1), DataMessage(2, "Message"))
-  val rb2 = Send(names(2), DataMessage(3, "Message"))
-  val rb3 = Send(names(0), DataMessage(4, "Message"))
+  val rb0 = Send(names(0), () => DataMessage(1, "Message"))
+  val rb1 = Send(names(1), () => DataMessage(2, "Message"))
+  val rb2 = Send(names(2), () => DataMessage(3, "Message"))
+  val rb3 = Send(names(0), () => DataMessage(4, "Message"))
   
   val a = Set(names(0))
   val b = Set(names(1), names(2))
