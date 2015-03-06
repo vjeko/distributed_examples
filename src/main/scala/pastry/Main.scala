@@ -19,11 +19,11 @@ object PastryTest extends Config
   val IDs : List[BigInt] = List(1, 3, 1234599, 5423)
   
   val bootstrapNode = system.actorOf(
-      Props(classOf[Peer], bootstrapID : BigInt), 
+      Props(classOf[PastryPeer], bootstrapID : BigInt), 
       name = toBase(bootstrapID))
 
   val nodes = IDs.map(id => system.actorOf(
-      Props(classOf[Peer], id : BigInt), 
+      Props(classOf[PastryPeer], id : BigInt), 
       name = toBase(id)))
       
       

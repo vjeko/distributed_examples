@@ -21,7 +21,7 @@ import com.typesafe.scalalogging.Logger
 
 
 
-class Peer extends Actor with Config {
+class PastryPeer extends Actor with Config {
   
   val logger = Logger(LoggerFactory.getLogger("pastry"))
   

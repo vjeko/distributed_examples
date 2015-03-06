@@ -113,11 +113,11 @@ object PastryBug extends App with Config
   val system = ActorSystem("pastry")
   
   val bootstrapID : BigInt = 54615
-  val bootstrapSpawn = Start(Props[Node], name = toBase(bootstrapID))
+  val bootstrapSpawn = Start(Props[PastryPeer], name = toBase(bootstrapID))
   val bootstrapInit = Send(toBase(bootstrapID), () => Bootstrap(bootstrapID, bootstrapID))
   
   val otherIDs : List[BigInt] = List(1, 3, 1234599, 5423)
-  val otherSpawns = otherIDs.map(i => Start(Props[Node], toBase(i)))
+  val otherSpawns = otherIDs.map(i => Start(Props[PastryPeer], toBase(i)))
   val otherInits = otherIDs.map(id => Send(toBase(id), () => Bootstrap(id, bootstrapID)))
 
   val externalEvents : Vector[ExternalEvent] = (Vector() :+
