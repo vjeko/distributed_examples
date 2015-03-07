@@ -7,7 +7,7 @@ import org.slf4j.{ Logger => Underlying }
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.Logger
 
-class RoutingTable(ID : BigInt) extends Config with Traversable[String] {
+class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)] {
 
   val logger = Logger(LoggerFactory.getLogger("pastry"))
 
@@ -17,21 +17,28 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[String] {
   val values = new HashSet[BigInt]
   val strValues = new HashSet[String]
   
-  val table = Array.ofDim[String](exponent, base)
+  val table = Array.ofDim[(String, BigInt)](exponent, base)
   
   
   // Initialize the array.
   for( y <- 1 to base; x <- 1 to exponent)
-    table(x - 1)(y - 1) = "-"
+    table(x - 1)(y - 1) = ("-", -1)
   
-  def foreach[U](f: String => U) = 
+  def foreach[U](f: ((String, BigInt)) => U) = 
     for(row <- table)
       for(value <- row) value match {
-        case "-" => // Skip!
-        case valid : String => f(value) 
+        case ("-", _) => // Skip!
+        case (valid, int) => f(value) 
       }
         
         
+  override def equals (other: Any) = other match {
+    case otherTable : RoutingTable =>
+      otherTable.myID == this.myID &&
+      otherTable.table.deep == this.table.deep
+    case _ => false
+  }
+  
   def dump() : Unit = {
     for( row <- table) {
       for(value <- row)
@@ -60,8 +67,8 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[String] {
     val (y, x) = location(keyStr)
     
     table(y)(x) match {
-      case "-" => return None
-      case _ => return Some( fromBase( table(y)(x) ) )
+      case ("-", _) => return None
+      case (_, _) => return Some( fromBase( table(y)(x)._1 ) )
     }
   }
   
@@ -79,9 +86,9 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[String] {
     logger.trace(myIDStr + ": " + "Removing " 
         + keyStr + " at row " + y + " column " + x)
     table(y)(x) match {
-      case "-" => return None
+      case ("-", _) => return None
       case _ =>
-        table(y)(x) = "-"
+        table(y)(x) = ("-", -1)
         return Some((y, x))
     }
   }
@@ -96,9 +103,9 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[String] {
     for (y <- 0 to exponent - 1)
       for (x <- 0 to base - 1)
         other.table(y)(x) match {
-          case "-" => // Skip!
-          case newEntry if (newEntry == myIDStr) => // Skip!
-          case newEntry => insertStr(newEntry)
+          case ("-", _) => // Skip!
+          case (newStr, newInt) if (newStr == myIDStr) => // Skip!
+          case (newStr, newInt) => insert((newStr, newInt))
         }
   
   
@@ -107,13 +114,12 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[String] {
    * By default, if there is already a value stored at that location
    * in the table, it is not overwritten.
    */
-  def insert(key : BigInt, overwrite : Boolean = false) : Option[(Int, Int)] = {
+  def insert(
+      tuple : (String, BigInt), overwrite : Boolean = false) : Option[(Int, Int)] = {
+    val (keyStr, key) = tuple
+    
     values += key
-    return insertStr(toBase(key), overwrite)
-  }
-  
-
-  def insertStr(keyStr : String, overwrite : Boolean = false) : Option[(Int, Int)] = {
+    
     assert(keyStr != myIDStr)
     
     strValues += keyStr
@@ -124,14 +130,21 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[String] {
      
     (table(y)(x), overwrite) match {
       case (_, true) => 
-        table(y)(x) = keyStr
+        table(y)(x) = (keyStr, key)
         return Some((y, x))
-      case ("-", _) =>
-        table(y)(x) = keyStr
+      case (("-", _), _) =>
+        table(y)(x) = (keyStr, key)
         return Some((y, x))
       case (_, _) =>
         return None
     }
     
   }
+  
+    def insertInt(
+      key: BigInt, overwrite : Boolean = false) : Option[(Int, Int)] = {
+      return insert((toBase(key), key), overwrite)
+    }
+
+
 }

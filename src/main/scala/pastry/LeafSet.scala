@@ -14,6 +14,12 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   
   def values : SortedSet[BigInt] = smaller ++ bigger
   
+  override def equals (other: Any) = other match {
+    case otherStruct : LeafSet => 
+      smaller.equals(otherStruct.smaller) &&
+      bigger.equals(otherStruct.bigger)
+    case _ => false
+  }
   
   def foreach[U](f: BigInt => U) = 
     for(value <- smaller ++ bigger)

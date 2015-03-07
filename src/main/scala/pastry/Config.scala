@@ -21,7 +21,7 @@ trait Config {
   
   object State extends Enumeration {
     type State = Value
-    val Offline, Joining, Online = Value
+    val Offline, Joining, PreOnline, Online = Value
   }
   
 

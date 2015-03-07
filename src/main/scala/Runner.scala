@@ -103,6 +103,14 @@ class ResultAggregator {
 
 object PastryBug extends App with Config
 {
+  
+  //val r0 = new RoutingTable(132)
+  //r0.insertInt(1010)
+  //val r1 = new RoutingTable(132)
+  //r0.insertInt(1010)
+  //println(r0 == r1)
+  
+  System.exit(0)
   val collector = new ResultAggregator
   val scheduler = new DPORwFailures
   
@@ -133,6 +141,7 @@ object PastryBug extends App with Config
 object Simple// extends App
 {
 
+  
   val scheduler = new DPORwFailures
   Instrumenter().scheduler = scheduler
   Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait
@@ -157,4 +166,5 @@ object Simple// extends App
       externalEvents, 
       collector.collect, 
       collector.done)
+
 }

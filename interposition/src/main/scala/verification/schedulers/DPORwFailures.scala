@@ -213,7 +213,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       Util.dequeueOne(pendingEvents) match {
         case Some( next @ (Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
-              + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
+              + "(" + snd + " -> " + rcv + ") " +  + id  + " " + msg + Console.RESET )
           Some(next)
           
         case Some(par @ (Unique(NetworkPartition(part1, part2), id), _, _)) =>
@@ -318,6 +318,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       
         currentTrace += nextEvent
         (depGraph get nextEvent)
+        
         parentEvent = nextEvent
 
         return Some((cell, env))
@@ -458,7 +459,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       case u @ Unique(m: MsgEvent, id) => u
       case _ => throw new Exception("parent event not a message")
     }
-
+    
     val inNeighs = depGraph.get(parent).inNeighbors
     inNeighs.find { x => x.value.event == msg } match {
       
@@ -816,14 +817,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
     }
 
     getNext() match {
-      case Some((maxIndex, (e1, e2), replayThis)) =>
-        //println(backTrack(maxIndex).head._2.map(x => x.id))
-        
+      case Some((maxIndex, (e1, e2), replayThis)) =>        
 
         logger.info(Console.RED + "Exploring a new message interleaving " + 
            e1.id + " and " + e2.id  + " at index " + maxIndex + Console.RESET)
             
-        
         exploredTacker.setExplored(maxIndex, (e1, e2))
         exploredTacker.trimExplored(maxIndex)
         exploredTacker.printExplored()

@@ -21,8 +21,12 @@ case class WriteReply(key : BigInt, value: BigInt) extends Msg
 case class ReadRequest(sender: BigInt, key: BigInt) extends Msg
 case class ReadReply(key : BigInt, value: BigInt) extends Msg
 
-case class JoinRequest(newPeer: BigInt, visitedPeers: ListBuffer[BigInt]) extends Msg
-case class JoinReply(visitedPeers: ListBuffer[BigInt]) extends Msg
+case class JoinRequest(newPeer: BigInt, 
+    visitedPeers: scala.collection.immutable.Queue[BigInt]) extends Msg
+case class JoinReply(
+    visitedPeers: scala.collection.immutable.Queue[BigInt]) extends Msg
 
 case class StateRequest(sender: BigInt, receiver: BigInt) extends Msg
 case class StateUpdate(sender: BigInt, receiver: BigInt, rt: RoutingTable, ls: LeafSet) extends Msg
+
+case class Ack(sender: BigInt, original: Any) extends Msg
