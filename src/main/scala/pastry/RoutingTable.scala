@@ -1,28 +1,33 @@
 package pastry
 
 
-import scala.collection.mutable.HashSet
-
 import org.slf4j.{ Logger => Underlying }
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.Logger
 
-class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)] {
+class RoutingTable(ID : BigInt) 
+  extends Config with Traversable[(String, BigInt)] {
 
   val logger = Logger(LoggerFactory.getLogger("pastry"))
 
   val myID = ID
   val myIDStr = toBase(ID)
   
-  val values = new HashSet[BigInt]
-  val strValues = new HashSet[String]
+  var values = new scala.collection.mutable.HashSet[BigInt]
+  //var table = Vector.fill(exponent, base)( ("-", -1 : BigInt) )
+  var table = Array.ofDim[(String, BigInt)](exponent, base)
   
-  val table = Array.ofDim[(String, BigInt)](exponent, base)
-  
-  
-  // Initialize the array.
   for( y <- 1 to base; x <- 1 to exponent)
     table(x - 1)(y - 1) = ("-", -1)
+  
+  
+  override def clone() : RoutingTable = {
+    val newRT = new RoutingTable(myID)
+    newRT.values = values.clone()
+    newRT.table = table.clone()
+    return newRT
+  }
+  
   
   def foreach[U](f: ((String, BigInt)) => U) = 
     for(row <- table)
@@ -35,9 +40,10 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)
   override def equals (other: Any) = other match {
     case otherTable : RoutingTable =>
       otherTable.myID == this.myID &&
-      otherTable.table.deep == this.table.deep
+      true
     case _ => false
   }
+  
   
   def dump() : Unit = {
     for( row <- table) {
@@ -45,7 +51,8 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)
         printf(s"%${exponent}s ", value)
       println()
     }
-  } 
+  }
+  
     
   def location(keyStr : String) : (Int, Int) = {
     
@@ -72,6 +79,8 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)
     }
   }
   
+  def update[T](v: Vector[Vector[T]])(c1: Int, c2: Int)(newVal: T) = 
+    v.updated(c1, v(c1).updated(c2, newVal))
   
   def remove(key : BigInt) : Option[(Int, Int)] = {
     values -= key
@@ -80,7 +89,6 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)
   
   
   def removeStr(keyStr : String) : Option[(Int, Int)] = {
-    strValues -= keyStr
     
     val (y, x) = location(keyStr)
     logger.trace(myIDStr + ": " + "Removing " 
@@ -88,7 +96,8 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)
     table(y)(x) match {
       case ("-", _) => return None
       case _ =>
-        table(y)(x) = ("-", -1)
+        //table(y)(x) = ("-", -1)
+        table = table.updated(y, table(y).updated(x, ("-", -1: BigInt)))
         return Some((y, x))
     }
   }
@@ -122,8 +131,6 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)
     
     assert(keyStr != myIDStr)
     
-    strValues += keyStr
-    
     val (y, x) = location(keyStr)
     logger.trace(myIDStr + ": " + "Inserting " 
         + keyStr + " at row " + y + " column " + x)
@@ -131,9 +138,11 @@ class RoutingTable(ID : BigInt) extends Config with Traversable[(String, BigInt)
     (table(y)(x), overwrite) match {
       case (_, true) => 
         table(y)(x) = (keyStr, key)
+        //table = update(table)(y, x)((keyStr, key))
         return Some((y, x))
       case (("-", _), _) =>
         table(y)(x) = (keyStr, key)
+        //table = update(table)(y, x)((keyStr, key))
         return Some((y, x))
       case (_, _) =>
         return None

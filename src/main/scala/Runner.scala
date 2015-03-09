@@ -18,7 +18,8 @@ import akka.dispatch.verification.Instrumenter,
        akka.dispatch.verification.Start,
        akka.dispatch.verification.Send,
        akka.dispatch.verification.DPORwFailures,
-       akka.dispatch.verification.Unique
+       akka.dispatch.verification.Unique,
+       akka.dispatch.verification.WaitQuiescence
 
 import scala.collection.immutable.Vector,
        scala.collection.mutable.Queue
@@ -110,7 +111,12 @@ object PastryBug extends App with Config
   //r0.insertInt(1010)
   //println(r0 == r1)
   
-  System.exit(0)
+  //val r0 = new LeafSet(132)
+  //r0.insert(1010)
+  //val r1 = new LeafSet(132)
+  //r1.insert(1010)
+  //r1.insert(1011)
+
   val collector = new ResultAggregator
   val scheduler = new DPORwFailures
   
@@ -124,12 +130,13 @@ object PastryBug extends App with Config
   val bootstrapSpawn = Start(Props[PastryPeer], name = toBase(bootstrapID))
   val bootstrapInit = Send(toBase(bootstrapID), () => Bootstrap(bootstrapID, bootstrapID))
   
+  //val otherIDs : List[BigInt] = List(1, 3, 1234599, 5423)
   val otherIDs : List[BigInt] = List(1, 3, 1234599, 5423)
   val otherSpawns = otherIDs.map(i => Start(Props[PastryPeer], toBase(i)))
   val otherInits = otherIDs.map(id => Send(toBase(id), () => Bootstrap(id, bootstrapID)))
 
   val externalEvents : Vector[ExternalEvent] = (Vector() :+
-    bootstrapSpawn :+ bootstrapInit) ++ otherSpawns ++ otherInits
+    bootstrapSpawn :+ bootstrapInit :+ WaitQuiescence) ++ otherSpawns ++ otherInits
     
   scheduler.run(
       externalEvents, 

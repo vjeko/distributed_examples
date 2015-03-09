@@ -17,7 +17,6 @@ import akka.dispatch.Envelope
 import akka.dispatch.MessageQueue
 import akka.dispatch.MessageDispatcher
 
-import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.Queue
 import scala.collection.mutable.Stack
 import scala.collection.mutable.HashMap
@@ -31,11 +30,11 @@ class InstrumenterCheckpoint(
   val seenActors : HashSet[(ActorSystem, Any)],
   val allowedEvents: HashSet[(ActorCell, Envelope)],
   val dispatchers : HashMap[ActorRef, MessageDispatcher],
-  val vectorClocks : HashMap[String, VectorClock],
+  //val vectorClocks : HashMap[String, VectorClock],
   val sys: ActorSystem,
-  var cancellableToTimer : HashMap[Cancellable, Tuple2[String, Any]],
-  var ongoingCancellableTasks : HashSet[Cancellable],
-  var timerToCancellable : HashMap[Tuple2[String,Any], Cancellable],
+  //var cancellableToTimer : HashMap[Cancellable, Tuple2[String, Any]],
+  //var ongoingCancellableTasks : HashSet[Cancellable],
+  //var timerToCancellable : HashMap[Tuple2[String,Any], Cancellable],
   // TODO(cs): add the random associated with this actor system
   val applicationCheckpoint: Any
 ) {}
@@ -421,7 +420,7 @@ class Instrumenter {
     // reinitialize_system, due to shutdownCallback. This is problematic,
     // unless the application properly uses CheckpointSink's protocol for
     // checking invariants
-    val checkpoint = new InstrumenterCheckpoint(
+    /*val checkpoint = new InstrumenterCheckpoint(
       new HashMap[String, ActorRef] ++ actorMappings,
       new HashSet[(ActorSystem, Any)] ++ seenActors,
       new HashSet[(ActorCell, Envelope)] ++ allowedEvents,
@@ -432,7 +431,7 @@ class Instrumenter {
       new HashSet[Cancellable] ++ ongoingCancellableTasks,
       new HashMap[Tuple2[String,Any], Cancellable] ++ timerToCancellable,
       checkpointCallback()
-    )
+    )*/
 
     Util.logger.reset
 
@@ -461,10 +460,10 @@ class Instrumenter {
     allowedEvents ++= checkpoint.allowedEvents
     dispatchers.clear
     dispatchers ++= checkpoint.dispatchers
-    Util.logger.actor2vc = checkpoint.vectorClocks
-    cancellableToTimer = checkpoint.cancellableToTimer
-    ongoingCancellableTasks = checkpoint.ongoingCancellableTasks
-    timerToCancellable = checkpoint.timerToCancellable
+    //Util.logger.actor2vc = checkpoint.vectorClocks
+    //cancellableToTimer = checkpoint.cancellableToTimer
+    //ongoingCancellableTasks = checkpoint.ongoingCancellableTasks
+    //timerToCancellable = checkpoint.timerToCancellable
     registeredCancellableTasks.clear
     registeredCancellableTasks ++= cancellableToTimer.keys
     _actorSystem = checkpoint.sys

@@ -30,12 +30,16 @@ class PastryPeer extends Actor with Config {
   
   var state = State.Offline
   
-  val rt = new RoutingTable(myID)
-  val ls = new LeafSet(myID)
+  var rt : RoutingTable = null
+  var ls : LeafSet = null
   
   val store = new HashMap[BigInt, BigInt]
   val barrier, ackBarrier, originalAckBarrier = new HashSet[BigInt]  
   
+  
+  def assertions(msg: Any) = {
+    assert(myID != 0, myIDStr + " " + msg)
+  }
   
   def getRef(peer: BigInt) : ActorSelection = {
     return getRef(toBase(peer))
@@ -47,6 +51,8 @@ class PastryPeer extends Actor with Config {
   
   
   def handleJoinThis(msg : JoinRequest) : Unit = {
+    assertions(msg)
+    
     val newPeer = msg.newPeer
     
     logger.trace(myIDStr + ": " + 
@@ -57,6 +63,8 @@ class PastryPeer extends Actor with Config {
   
   
   def handleJoinThat(msg : JoinRequest, nextPeer: BigInt) : Unit = {
+    assertions(msg)
+    
     val newPeer = msg.newPeer
     
     logger.trace(myIDStr + ": " + toBase(nextPeer) + 
@@ -66,6 +74,8 @@ class PastryPeer extends Actor with Config {
   
   
   def handleJoinReply(sender : ActorRef, msg : JoinReply) = {
+    assertions(msg)
+    
     logger.trace(myIDStr + ": " + "Visited nodes: " + msg.visitedPeers)
     
     for(peer <- msg.visitedPeers) {
@@ -99,6 +109,8 @@ class PastryPeer extends Actor with Config {
   
   
   def handleJoin(sender : ActorRef, msg : JoinRequest) = {
+    assertions(msg)
+    
     val newPeer = msg.newPeer
     getNext(newPeer) match {
       case None => handleJoinThis(msg)
@@ -108,12 +120,16 @@ class PastryPeer extends Actor with Config {
   
   
   def handleState(sender : ActorRef, msg : StateRequest) = {
-    val reply = StateUpdate(myID, msg.sender, rt, ls)
+    assertions(msg)
+    
+    val reply = StateUpdate(myID, msg.sender, rt.clone(), ls.clone())
     getRef(msg.sender) ! reply
   }
   
   
   def handleStateReply(senderRef : ActorRef, msg : StateUpdate) = {
+    assertions(msg)
+    
     val sender = msg.sender
     
     assert(msg.sender != myID)
@@ -145,29 +161,38 @@ class PastryPeer extends Actor with Config {
    * leaf set, and routing table.
    */
   def handleCompletion(): Unit = {
+    
     state = State.PreOnline
-
+    
     for((peerStr, peerInt) <- rt) {
       ackBarrier += peerInt
       originalAckBarrier += peerInt
       logger.trace(myIDStr + ": " + "Adding " + peerStr + " " + peerInt + " to " + ackBarrier)
-      getRef(peerInt) ! StateUpdate(myID, peerInt, this.rt, this.ls)
     }
+    
     
     for(peer <- ls) {
       ackBarrier += peer
       originalAckBarrier += peer
       
       logger.trace(myIDStr + ": " + "Adding " + peer + " to " + ackBarrier)
-       getRef(peer) ! StateUpdate(myID, peer, this.rt, this.ls)
+    }
+    
+    
+    for (peer <- originalAckBarrier) {
+      getRef(peer) ! StateUpdate(myID, peer, rt.clone(), ls.clone())
     }
    }
 
     
 
   def handleBootstrap(sender : ActorRef, msg: Bootstrap) = {
+    
     myID = msg.id
     myIDStr = toBase(myID)
+    
+    rt = new RoutingTable(myID)
+    ls = new LeafSet(myID)
     
     state = State.Joining
     msg.booststrapPeer match {
@@ -182,6 +207,8 @@ class PastryPeer extends Actor with Config {
   
   
   def handleWriteRequest(sender : ActorRef, msg : WriteRequest) = {
+    assertions(msg)
+    
     getNext(msg.key) match {
       case None =>
         logger.trace(myIDStr + ": " + "Wrote " + msg.key + " <- " + msg.value)
@@ -192,6 +219,8 @@ class PastryPeer extends Actor with Config {
   
   
   def handleReadRequest(sender : ActorRef, msg : ReadRequest) = {
+    assertions(msg)
+    
     getNext(msg.key) match {
       case None => 
         val value = store(msg.key)
@@ -201,6 +230,8 @@ class PastryPeer extends Actor with Config {
   }
   
   def handleAck(senderRef : ActorRef, msg : Ack) = {
+    assertions(msg)
+    
     if (state == State.PreOnline) {
       val sender = msg.sender
       
@@ -222,8 +253,6 @@ class PastryPeer extends Actor with Config {
     
     // External API:
     case msg: Bootstrap => handleBootstrap(sender, msg)
-    
-    assert(myID != 0)
     
     case Write(key, value) => handleWriteRequest(sender, WriteRequest(myID, key, value))
     case Read(key) => handleReadRequest(sender, ReadRequest(myID, key))

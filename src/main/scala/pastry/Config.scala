@@ -2,8 +2,6 @@ package pastry
 
 import spire.math._
 
-import scala.collection.mutable.HashSet
-
 import akka.actor.Actor,
        akka.actor.ActorRef,
        akka.actor.DeadLetter,
@@ -39,7 +37,7 @@ trait Config {
   }
   
   
-  def closest(set: HashSet[BigInt], key: BigInt) : Option[BigInt] = {
+  def closest(set: scala.collection.mutable.HashSet[BigInt], key: BigInt) : Option[BigInt] = {
     if (set.isEmpty) return None
     return Some(set.minBy(v => (v - key).abs))
   }

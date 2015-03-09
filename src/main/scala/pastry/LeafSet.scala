@@ -1,6 +1,6 @@
 package pastry
 
-import scala.collection.mutable.SortedSet
+import scala.collection.mutable.PriorityQueue
 
 class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   
@@ -8,16 +8,17 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   val myIDStr = toBase(ID)
   
   val L : Int = 4
-  var smaller = SortedSet[BigInt]()
-  var bigger = SortedSet[BigInt]()
+  var smaller = scala.collection.mutable.PriorityQueue[BigInt]()(Ordering.by(x => -x))
+  var bigger = scala.collection.mutable.PriorityQueue[BigInt]()(Ordering.by(x => x))
   
   
-  def values : SortedSet[BigInt] = smaller ++ bigger
+  def values : PriorityQueue[BigInt] = smaller ++ bigger
   
   override def equals (other: Any) = other match {
     case otherStruct : LeafSet => 
-      smaller.equals(otherStruct.smaller) &&
-      bigger.equals(otherStruct.bigger)
+      myID == otherStruct.myID &&
+      smaller.toArray.deep == otherStruct.smaller.toArray.deep &&
+      bigger.toArray.deep == otherStruct.bigger.toArray.deep
     case _ => false
   }
   
@@ -25,14 +26,12 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
     for(value <- smaller ++ bigger)
       f(value)
   
-      
-  def smallest[A](set: SortedSet[A]) : A = {
-    return set.take(1).head
-  }
   
-  
-  def biggest[A](set: SortedSet[A]) : A = {
-    return set.takeRight(1).head
+  override def clone() : LeafSet = {
+    val newLS = new LeafSet(myID)
+    newLS.smaller = smaller.clone()
+    newLS.bigger = bigger.clone()
+    return newLS
   }
   
   
@@ -42,20 +41,18 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
     key < myID match {
       
       case true =>
-        val set = smaller
         
-        if (set.isEmpty || key < smallest(set))
+        if (smaller.isEmpty || key < smaller.head)
           return None
           
-        return Some(set.minBy(v => (v - key).abs))
+        return Some(smaller.minBy(v => (v - key).abs))
         
       case false =>
-        val set = bigger
 
-        if (set.isEmpty || key > biggest(set))
+        if (bigger.isEmpty || key > bigger.head)
           return None
           
-        return Some(set.minBy(v => (v - key).abs))
+        return Some(bigger.minBy(v => (v - key).abs))
     }
 
   }
@@ -74,15 +71,14 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   
   def insert(key: BigInt) : Unit = {
     assert(key != myID)
-    
     if (key < myID) {
       smaller += key
       if (smaller.size > L)
-        smaller = smaller.drop(1)
+        smaller.dequeue()
     } else {
       bigger += key
       if (bigger.size > L)
-        bigger = bigger.dropRight(1)
+        bigger.dequeue()
     }
   }
   

@@ -13,8 +13,7 @@ import akka.dispatch.Envelope,
        akka.dispatch.MessageQueue,
        akka.dispatch.MessageDispatcher
 
-import scala.collection.concurrent.TrieMap,
-       scala.collection.mutable.Queue,
+import scala.collection.mutable.Queue,
        scala.collection.mutable.HashMap,
        scala.collection.mutable.HashSet,
        scala.collection.mutable.ArrayBuffer,
@@ -211,9 +210,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
       
       // Do we have some pending events
       Util.dequeueOne(pendingEvents) match {
-        case Some( next @ (Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
+        case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
-              + "(" + snd + " -> " + rcv + ") " +  + id  + " " + msg + Console.RESET )
+              + "(" + snd + " -> " + rcv + ") " +  + id  + " " + msg + " -> " + depGraph.get(u).outNeighbors+ Console.RESET )
           Some(next)
           
         case Some(par @ (Unique(NetworkPartition(part1, part2), id), _, _)) =>
