@@ -32,6 +32,17 @@ import com.typesafe.scalalogging.LazyLogging,
        ch.qos.logback.classic.Logger
 
 
+object ActorRegistry {
+  val actors = new HashMap[String, Any]
+}
+       
+trait ActorObserver {
+  assert(this.isInstanceOf[Actor], "not an actor")
+  val actor = this.asInstanceOf[Actor]
+  ActorRegistry.actors(actor.self.path.name) = this
+ }
+       
+
 // DPOR scheduler.
 class DPORwFailures extends Scheduler with LazyLogging {
   
@@ -45,6 +56,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   var currentTime = 0
   var interleavingCounter = 0
+
+  var invariantChecker : InvariantChecker = new NullInvariantChecker()
   
   val pendingEvents = new HashMap[String, Queue[(Unique, ActorCell, Envelope)]]  
   val actorNames = new HashSet[String]
@@ -59,7 +72,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   val currentTrace = new Queue[Unique]
   val nextTrace = new Queue[Unique]
-  var parentEvent = getRootEvent
+  
+  var parentEvent = getRootRootEvent
+  var scheduledEvent : Unique = null
   
   val reachabilityMap = new HashMap[String, Set[String]]
   
@@ -91,10 +106,19 @@ class DPORwFailures extends Scheduler with LazyLogging {
     quiescentPeriod(event) = currentQuiescentPeriod
   }
   
-  def getRootEvent() : Unique = {
+  def getRootRootEvent() : Unique = {
     var root = Unique(MsgEvent("null", "null", null), 0)
     addGraphNode(root)
     return root
+  }
+  
+    
+  def getRootEvent(child: depGraph.NodeT) : depGraph.NodeT = {
+    child.outNeighbors match {
+      case parents if parents.isEmpty => return child
+      case parents if parents.size == 1 => return getRootEvent(parents.head)
+      case _ => throw new Exception("not a tree")
+    }
   }
   
   
@@ -139,11 +163,15 @@ class DPORwFailures extends Scheduler with LazyLogging {
   // Notification that the system has been reset
   def start_trace() : Unit = {
     
+    invariantChecker.init(ActorRegistry.actors)
+    invariantChecker.newRun()
+    
     started = false
     actorNames.clear
+    ActorRegistry.actors.clear()
     externalEventIdx = 0
     
-    currentTrace += getRootEvent()
+    currentTrace += getRootRootEvent()
     runExternal()
   }
   
@@ -174,7 +202,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   // Figure out what is the next message to schedule.
   def schedule_new_message() : Option[(ActorCell, Envelope)] = {
-    
     
     def checkInvariant[T1](result : Option[T1]) = result match {
     
@@ -212,7 +239,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
       Util.dequeueOne(pendingEvents) match {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
-              + "(" + snd + " -> " + rcv + ") " +  + id  + " " + msg + " -> " + depGraph.get(u).outNeighbors+ Console.RESET )
+              //+ "(" + snd + " -> " + rcv + ") " +  + id  + " " + msg + " -> " + depGraph.get(u).outNeighbors+ Console.RESET )
+              + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
           Some(next)
           
         case Some(par @ (Unique(NetworkPartition(part1, part2), id), _, _)) =>
@@ -261,9 +289,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
         case None => None
         case _ => throw new Exception("internal error")
       }
-    
     }
-    //
+
+    
     // Are there any prioritized events that need to be dispatched.
     pendingEvents.get(PRIORITY) match {
       case Some(queue) if !queue.isEmpty => {
@@ -340,7 +368,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
       case Some((nextEvent @ Unique(WaitQuiescence, nID), _, _)) =>
         awaitQuiescenceUpdate(nextEvent)
+        scheduledEvent = nextEvent
         return schedule_new_message()
+        
       case _ => return None
     }
     
@@ -358,12 +388,40 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   
   def event_consumed(cell: ActorCell, envelope: Envelope) = {
+    invariantChecker.messageConsumed(cell, envelope)
   }
   
   
   def event_produced(event: Event) = event match {
       case event : SpawnEvent => actorNames += event.name
       case msg : MsgEvent => 
+  }
+  
+  def event_produced(cell: ActorCell, envelope: Envelope) = {
+
+    invariantChecker.messageProduced(cell, envelope)
+    
+    envelope.message match {
+    
+      // Decomposed network events are simply enqueued to the priority queued
+      // and dispatched at the earliest convenience.
+      case par: NodesUnreachable =>
+        val msgs = pendingEvents.getOrElse(PRIORITY, new Queue[(Unique, ActorCell, Envelope)])
+        pendingEvents(PRIORITY) = msgs += ((null, cell, envelope))
+        
+      case _ =>
+        val unique @ Unique(msg : MsgEvent , id) = getMessage(cell, envelope)
+        val msgs = pendingEvents.getOrElse(msg.receiver, new Queue[(Unique, ActorCell, Envelope)])
+        pendingEvents(msg.receiver) = msgs += ((unique, cell, envelope))
+        
+        logger.trace(Console.BLUE + "New event: " +
+            "(" + msg.sender + " -> " + msg.receiver + ") " +
+            id + Console.RESET)
+        
+        addGraphNode(unique)
+        depGraph.addEdge(unique, parentEvent)(DiEdge)
+    }
+
   }
 
   
@@ -456,6 +514,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
     
     val parent = parentEvent match {
       case u @ Unique(m: MsgEvent, id) => u
+      case u @ Unique(WaitQuiescence, id) => u
       case _ => throw new Exception("parent event not a message")
     }
     
@@ -475,35 +534,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
   }
   
   
-  
-  def event_produced(cell: ActorCell, envelope: Envelope) = {
-
-    envelope.message match {
-    
-      // Decomposed network events are simply enqueued to the priority queued
-      // and dispatched at the earliest convenience.
-      case par: NodesUnreachable =>
-        val msgs = pendingEvents.getOrElse(PRIORITY, new Queue[(Unique, ActorCell, Envelope)])
-        pendingEvents(PRIORITY) = msgs += ((null, cell, envelope))
-        
-      case _ =>
-        val unique @ Unique(msg : MsgEvent , id) = getMessage(cell, envelope)
-        val msgs = pendingEvents.getOrElse(msg.receiver, new Queue[(Unique, ActorCell, Envelope)])
-        pendingEvents(msg.receiver) = msgs += ((unique, cell, envelope))
-        
-        logger.trace(Console.BLUE + "New event: " +
-            "(" + msg.sender + " -> " + msg.receiver + ") " +
-            id + Console.RESET)
-        
-        addGraphNode(unique)
-        depGraph.addEdge(unique, parentEvent)(DiEdge)
-    }
-    
-
-
-  }
-  
-  
   // Called before we start processing a newly received event
   def before_receive(cell: ActorCell) {
   }
@@ -518,6 +548,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
     for(node <- path) {
       node.value match {
         case Unique(m : MsgEvent, id) => pathStr += id + " "
+        case Unique(WaitQuiescence, id) => pathStr += id + " "
         case _ => throw new Exception("internal error not a message")
       }
     }
@@ -532,6 +563,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
       awaitingQuiescence = false
       logger.trace(Console.BLUE + " Done waiting for quiescence " + Console.RESET)
 
+      println(scheduledEvent)
+      parentEvent = scheduledEvent
+      
       currentQuiescentPeriod = nextQuiescentPeriod
       nextQuiescentPeriod = 0
 
@@ -540,10 +574,14 @@ class DPORwFailures extends Scheduler with LazyLogging {
       quiescentMarker = null
 
       runExternal()
+      
     } else {
+      
       logger.info("\n--------------------- Interleaving #" +
                   interleavingCounter + " ---------------------")
       
+      //if (interleavingCounter > 0) System.exit(0)
+                  
       logger.debug(Console.BLUE + "Current trace: " +
           Util.traceStr(currentTrace) + Console.RESET)
 
@@ -557,7 +595,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
           logger.debug(Console.BLUE + "Next trace:  " + 
               Util.traceStr(nextTrace) + Console.RESET)
           
-          parentEvent = getRootEvent
+          parentEvent = getRootRootEvent()
 
           post(currentTrace)
           
@@ -599,8 +637,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
   def dpor(trace: Queue[Unique]) : Option[Queue[Unique]] = {
     
     interleavingCounter += 1
-    val root = getEvent(0, currentTrace)
-    val rootN = ( depGraph get getRootEvent )
     
     val racingIndices = new HashSet[Integer]
     
@@ -631,7 +667,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
         // can simply move it in front of the earlier event.
         // This might cause the earlier event to become disabled,
         // but we have no way of knowing.
-        case (_: MsgEvent,_: NetworkPartition) =>
+        case (_: MsgEvent, _: NetworkPartition) =>
           val branchI = earlierI
           val needToReplay = List(later, earlier)
             
@@ -658,20 +694,23 @@ class DPORwFailures extends Scheduler with LazyLogging {
           // correspond to those events
           val earlierN = (depGraph get earlier)
           val laterN = (depGraph get later)
-
+          
           // Get the dependency path between later event and the
           // root event (root node) in the system.
-          val laterPath = laterN.pathTo(rootN) match {
+          val laterPath = laterN.pathTo(getRootEvent(laterN)) match {
             case Some(path) => path.nodes.toList.reverse
             case None => throw new Exception("no such path")
           }
 
           // Get the dependency path between earlier event and the
           // root event (root node) in the system.
-          val earlierPath = earlierN.pathTo(rootN) match {
+          val earlierPath = earlierN.pathTo(getRootEvent(earlierN)) match {
             case Some(path) => path.nodes.toList.reverse
             case None => throw new Exception("no such path")
           }
+          
+          //println("earlierPath " + printPath(earlierPath))
+          //println("laterPath   " + printPath(laterPath))
 
           // Find the common prefix for the above paths.
           val commonPrefix = laterPath.intersect(earlierPath)
@@ -727,9 +766,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
       case (Unique(m1 : MsgEvent, _), Unique(m2 : MsgEvent, _)) =>
         if (m1.receiver != m2.receiver) 
           return false
+          
         if (quiescentPeriod.get(earlier).get != quiescentPeriod.get(later).get) {
           return false
         }
+        
         val earlierN = (depGraph get earlier)
         val laterN = (depGraph get later)
         
@@ -820,7 +861,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
         logger.info(Console.RED + "Exploring a new message interleaving " + 
            e1.id + " and " + e2.id  + " at index " + maxIndex + Console.RESET)
-            
+        logger.info(Console.RED + e1 + Console.RESET)
+        logger.info(Console.RED + e2 + Console.RESET)
+           
         exploredTacker.setExplored(maxIndex, (e1, e2))
         exploredTacker.trimExplored(maxIndex)
         exploredTacker.printExplored()

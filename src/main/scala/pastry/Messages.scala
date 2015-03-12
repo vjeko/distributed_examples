@@ -27,6 +27,7 @@ case class JoinReply(
     visitedPeers: scala.collection.immutable.Queue[BigInt]) extends Msg
 
 case class StateRequest(sender: BigInt, receiver: BigInt) extends Msg
-case class StateUpdate(sender: BigInt, receiver: BigInt, rt: RoutingTable, ls: LeafSet) extends Msg
+case class StateReply(sender: BigInt, receiver: BigInt, rt: RoutingTable, ls: LeafSet) extends Msg
 
-case class Ack(sender: BigInt, original: Any) extends Msg
+case class PushState(sender: BigInt, receiver: BigInt, rt: RoutingTable, ls: LeafSet) extends Msg
+case class PushStateAck(sender: BigInt, original: Any) extends Msg

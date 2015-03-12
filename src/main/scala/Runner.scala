@@ -19,7 +19,8 @@ import akka.dispatch.verification.Instrumenter,
        akka.dispatch.verification.Send,
        akka.dispatch.verification.DPORwFailures,
        akka.dispatch.verification.Unique,
-       akka.dispatch.verification.WaitQuiescence
+       akka.dispatch.verification.WaitQuiescence,
+       akka.dispatch.verification.PastryInvariantChecker
 
 import scala.collection.immutable.Vector,
        scala.collection.mutable.Queue
@@ -119,6 +120,8 @@ object PastryBug extends App with Config
 
   val collector = new ResultAggregator
   val scheduler = new DPORwFailures
+  
+  scheduler.invariantChecker = new PastryInvariantChecker
   
   Instrumenter().scheduler = scheduler
   Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait

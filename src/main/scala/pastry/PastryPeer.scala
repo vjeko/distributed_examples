@@ -16,12 +16,12 @@ import scala.collection.mutable.HashMap,
        scala.collection.mutable.HashSet,
        scala.collection.mutable.ListBuffer
 
+import akka.dispatch.verification.ActorObserver
+
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.Logger
 
-
-
-class PastryPeer extends Actor with Config {
+class PastryPeer extends Actor with Config with ActorObserver {
   
   val logger = Logger(LoggerFactory.getLogger("pastry"))
   
@@ -119,15 +119,38 @@ class PastryPeer extends Actor with Config {
   }
   
   
-  def handleState(sender : ActorRef, msg : StateRequest) = {
+  def handleStateRequest(sender : ActorRef, msg : StateRequest) = {
     assertions(msg)
     
-    val reply = StateUpdate(myID, msg.sender, rt.clone(), ls.clone())
+    val reply = StateReply(myID, msg.sender, rt.clone(), ls.clone())
     getRef(msg.sender) ! reply
   }
   
   
-  def handleStateReply(senderRef : ActorRef, msg : StateUpdate) = {
+  def handlePushState(senderRef : ActorRef, msg : PushState) = {
+    assertions(msg)
+    
+    val sender = msg.sender
+    
+    assert(msg.sender != myID)
+    
+     /**
+     *  Technically, we only need to steal the leaf set from the
+     *  closest node. Adding any additional leaf sets does not do
+     *  any harm.
+     */
+    rt.insertInt(sender)
+    ls.insert(sender)
+    
+    rt.steal(msg.rt)
+    ls.steal(msg.ls)
+    
+    getRef(sender) ! PushStateAck(myID, msg)
+    
+  }
+  
+  
+  def handleStateReply(senderRef : ActorRef, msg : StateReply) = {
     assertions(msg)
     
     val sender = msg.sender
@@ -180,7 +203,7 @@ class PastryPeer extends Actor with Config {
     
     
     for (peer <- originalAckBarrier) {
-      getRef(peer) ! StateUpdate(myID, peer, rt.clone(), ls.clone())
+      getRef(peer) ! PushState(myID, peer, rt.clone(), ls.clone())
     }
    }
 
@@ -229,13 +252,15 @@ class PastryPeer extends Actor with Config {
     }
   }
   
-  def handleAck(senderRef : ActorRef, msg : Ack) = {
+  
+  def handlePushStateAck(senderRef : ActorRef, msg : PushStateAck) = {
     assertions(msg)
     
     if (state == State.PreOnline) {
       val sender = msg.sender
       
-      assert(originalAckBarrier contains sender)
+      assert(originalAckBarrier contains sender, 
+          "Original = " + originalAckBarrier + "\nsender = " + sender)
       
       ackBarrier -= sender
       if (ackBarrier.isEmpty) {
@@ -264,10 +289,11 @@ class PastryPeer extends Actor with Config {
     case msg : JoinRequest => handleJoin(sender, msg)
     case msg : JoinReply => handleJoinReply(sender, msg)
     
-    case msg : StateRequest => handleState(sender, msg)
-    case msg : StateUpdate => handleStateReply(sender, msg)
+    case msg : StateRequest => handleStateRequest(sender, msg)
+    case msg : StateReply => handleStateReply(sender, msg)
     
-    case msg : Ack => handleAck(sender, msg)
+    case msg : PushState => handlePushState(sender, msg)
+    case msg : PushStateAck => handlePushStateAck(sender, msg)
     
     case other => throw new Exception("unknown message " + other)
   }

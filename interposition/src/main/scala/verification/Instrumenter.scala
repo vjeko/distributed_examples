@@ -17,6 +17,7 @@ import akka.dispatch.Envelope
 import akka.dispatch.MessageQueue
 import akka.dispatch.MessageDispatcher
 
+import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.Queue
 import scala.collection.mutable.Stack
 import scala.collection.mutable.HashMap
@@ -30,11 +31,11 @@ class InstrumenterCheckpoint(
   val seenActors : HashSet[(ActorSystem, Any)],
   val allowedEvents: HashSet[(ActorCell, Envelope)],
   val dispatchers : HashMap[ActorRef, MessageDispatcher],
-  //val vectorClocks : HashMap[String, VectorClock],
+  val vectorClocks : HashMap[String, VectorClock],
   val sys: ActorSystem,
-  //var cancellableToTimer : HashMap[Cancellable, Tuple2[String, Any]],
-  //var ongoingCancellableTasks : HashSet[Cancellable],
-  //var timerToCancellable : HashMap[Tuple2[String,Any], Cancellable],
+  var cancellableToTimer : HashMap[Cancellable, Tuple2[String, Any]],
+  var ongoingCancellableTasks : HashSet[Cancellable],
+  var timerToCancellable : HashMap[Tuple2[String,Any], Cancellable],
   // TODO(cs): add the random associated with this actor system
   val applicationCheckpoint: Any
 ) {}
@@ -87,15 +88,15 @@ class Instrumenter {
   def actorSystem () : ActorSystem = {
     if (_actorSystem == null) {
       _actorSystem = ActorSystem("new-system-" + counter)
-      _randoms(_actorSystem) = new Random(0)
+      _random = new Random(0)
       counter += 1
     }
     _actorSystem
   }
 
-  private[this] var _randoms = new HashMap[ActorSystem, Random]
+  private[this] var _random = new Random(0)
   def seededRandom() : Random = {
-    return _randoms(actorSystem())
+    return _random
   }
  
   
@@ -145,7 +146,7 @@ class Instrumenter {
   def reinitialize_system(sys: ActorSystem, argQueue: Queue[Any]) {
     require(scheduler != null)
     _actorSystem = ActorSystem("new-system-" + counter)
-    _randoms(_actorSystem) = new Random(0)
+    _random = new Random(0)
     counter += 1
     
     actorMappings.clear()
@@ -268,8 +269,8 @@ class Instrumenter {
       case None => throw new Exception("internal error")
     }
     
-    scheduler.event_consumed(cell, envelope)
     dispatcher.dispatch(cell, envelope)
+    scheduler.event_consumed(cell, envelope)
   }
   
   
@@ -317,20 +318,23 @@ class Instrumenter {
     }
   }
 
-  def await_timers(numTimers: Integer) {
+  // Return whether there were any timers to wait for...
+  def await_timers(numTimers: Integer): Boolean = {
+    updateCancellables()
     if (numTimers <= 0) {
       throw new IllegalArgumentException("numTimers must be > 0")
     }
     if (registeredCancellableTasks.isEmpty) {
-      throw new RuntimeException("No timers to wait for...")
+      return false
     }
     pendingTimers.set(numTimers)
     awaitTimers.acquire()
+    return true
   }
 
-  def await_timers() {
+  def await_timers(): Boolean = {
     updateCancellables()
-    await_timers(registeredCancellableTasks.size)
+    return await_timers(registeredCancellableTasks.size)
   }
 
   def notify_timer_scheduled(sender: ActorRef, receiver: ActorRef, msg: Any) : Boolean = {
@@ -420,7 +424,7 @@ class Instrumenter {
     // reinitialize_system, due to shutdownCallback. This is problematic,
     // unless the application properly uses CheckpointSink's protocol for
     // checking invariants
-    /*val checkpoint = new InstrumenterCheckpoint(
+    val checkpoint = new InstrumenterCheckpoint(
       new HashMap[String, ActorRef] ++ actorMappings,
       new HashSet[(ActorSystem, Any)] ++ seenActors,
       new HashSet[(ActorCell, Envelope)] ++ allowedEvents,
@@ -431,7 +435,7 @@ class Instrumenter {
       new HashSet[Cancellable] ++ ongoingCancellableTasks,
       new HashMap[Tuple2[String,Any], Cancellable] ++ timerToCancellable,
       checkpointCallback()
-    )*/
+    )
 
     Util.logger.reset
 
@@ -460,10 +464,10 @@ class Instrumenter {
     allowedEvents ++= checkpoint.allowedEvents
     dispatchers.clear
     dispatchers ++= checkpoint.dispatchers
-    //Util.logger.actor2vc = checkpoint.vectorClocks
-    //cancellableToTimer = checkpoint.cancellableToTimer
-    //ongoingCancellableTasks = checkpoint.ongoingCancellableTasks
-    //timerToCancellable = checkpoint.timerToCancellable
+    Util.logger.actor2vc = checkpoint.vectorClocks
+    cancellableToTimer = checkpoint.cancellableToTimer
+    ongoingCancellableTasks = checkpoint.ongoingCancellableTasks
+    timerToCancellable = checkpoint.timerToCancellable
     registeredCancellableTasks.clear
     registeredCancellableTasks ++= cancellableToTimer.keys
     _actorSystem = checkpoint.sys
