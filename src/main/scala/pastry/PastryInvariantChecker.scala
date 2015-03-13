@@ -63,6 +63,8 @@ class PastryInvariantChecker extends InvariantChecker {
     if (onlineSet == newOnlineSet) return
     
     onlineSet = newOnlineSet
+    
+    
     invariantOverlapImpl()
   }
   
@@ -80,9 +82,17 @@ class PastryInvariantChecker extends InvariantChecker {
       val a = it1.next()
       val b = it2.next()
       val aPeer = actors(a).asInstanceOf[PastryPeer]
+      val aConfig = actors(a).asInstanceOf[Config]
       val bPeer = actors(b).asInstanceOf[PastryPeer]
-      println(a + " <-> " + b)
-      println(aPeer.ls.bigger + " <-> " + bPeer.ls.smaller)
+      val bConfig = actors(b).asInstanceOf[Config]
+      
+
+      println(aPeer.ls.leftNeighStr + ":" + aPeer.myIDStr + ":" + aPeer.ls.rightNeighStr + " <-> " + 
+              bPeer.ls.leftNeighStr + ":" + bPeer.myIDStr + ":" + bPeer.ls.rightNeighStr)
+              
+      assert(aPeer.ls.rightNeighStr == bPeer.myIDStr)
+      assert(aPeer.myIDStr == bPeer.ls.leftNeighStr)
+      
     }
   }
 }
