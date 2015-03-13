@@ -30,15 +30,15 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   
   def leftNeighStr = toBase(leftNeigh)
   def leftNeigh : Int = {
-    val l = left.clone()
-    return l.dequeueAll.iterator.drop(left.size - 1).next()
+    val col = left.clone().dequeueAll
+    return col.iterator.drop(col.size - 1).next()
   }
   
   
   def rightNeighStr = toBase(rightNeigh)
   def rightNeigh : Int = {
-    val r = right.clone()
-    return r.dequeueAll.iterator.drop(right.size - 1).next()
+    val col = right.clone().dequeueAll
+    return col.iterator.drop(col.size - 1).next()
   }
   
   
@@ -74,11 +74,6 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
     }
   
   
-  def addTo(col: PriorityQueue[Int], value : Int) = {
-      if (!col.exists(x => x == value))
-        col.enqueue(value)
-  }
-  
   def insert(rawKey: BigInt) : Unit = {
     val key = (rawKey % modulo) + modulo
     assert(key % modulo != myID % modulo)
@@ -86,28 +81,13 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
     
     key < myID match {
       case true =>
-        addTo(left, key.toInt)
-        addTo(right, (key + modulo).toInt)
-        
-        if (myIDStr == "012") {
-          println("\t Inserting smaller " + toBase(key % modulo) + " -- " + key)
-          println("\t " + left)
-          println("\t " + toBase(left.last))
-        }
+        left.enqueue(key.toInt)
+        right.enqueue((key + modulo).toInt)
         
       case false =>
-        addTo(right, key.toInt)
-        addTo(left, (key - modulo).toInt)
-        
-        if (myIDStr == "012") {
-          println("\t Inserting bigger " + toBase(key % modulo) + " -- " + (key - modulo))
-          println("\t " + left)
-          println("\t " + toBase(left.last))
-        }
+        right.enqueue(key.toInt)
+        left.enqueue((key - modulo).toInt)
     }
-    
-    left = left.result()
-    right = right.result()
     
     while(left.size > L) {
       left.dequeue()
