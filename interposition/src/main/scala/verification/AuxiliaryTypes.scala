@@ -18,10 +18,21 @@ object IDGenerator {
 }
 
        
-case class Unique(
+final case class Unique(
   val event : Event,
   var id : Int = IDGenerator.get()
-) extends ExternalEvent
+) extends ExternalEvent {
+  
+  override def equals (other: Any) = other match {
+    case u: Unique if (u.id == this.id || u.event.equals(this.event)) =>
+        true
+    case u: Unique => false
+    case _ =>
+      println("??? " + other)
+      throw new Exception("not a Unique event")
+  }
+  
+}
 
 case class Uniq[E](
   val element : E,

@@ -19,7 +19,7 @@ import akka.dispatch.Envelope,
 class PastryInvariantChecker extends InvariantChecker {
 
   var actors = new HashMap[String, Any]  
-  val onlineSet = new HashSet[String]
+  var onlineSet = new HashSet[String]
   
   
   def init(actorMap: HashMap[String, Any]) {
@@ -31,10 +31,9 @@ class PastryInvariantChecker extends InvariantChecker {
     onlineSet.clear()
   }
   
-  
   def messageProduced(cell: ActorCell, envelope: Envelope) {
+   
   }
-  
   
   def messageConsumed(cell: ActorCell, envelope: Envelope) {
     invariantOverlap(cell, envelope)
@@ -49,16 +48,41 @@ class PastryInvariantChecker extends InvariantChecker {
    */
   def invariantOverlap(cell: ActorCell, envelope: Envelope) {
     
+    val newOnlineSet = new HashSet[String]
+    
     for((name, actor) <- actors) {
       assert(actor.isInstanceOf[PastryPeer])
       val peer = actor.asInstanceOf[PastryPeer]
       val config = actor.asInstanceOf[Config]
       
       if (peer.state == config.State.Online)
-        onlineSet += peer.self.path.name
-        
+        newOnlineSet += peer.self.path.name
     }
         
+    
+    if (onlineSet == newOnlineSet) return
+    
+    onlineSet = newOnlineSet
+    invariantOverlapImpl()
   }
   
+  
+  def invariantOverlapImpl() {
+    val size = onlineSet.size
+    if (size <= 1) return
+    
+    val array = onlineSet.toList.sortBy { x => x }
+    val it1 = Iterator.continually(array).flatten
+    val it2 = Iterator.continually(array).flatten.drop(1)
+    
+    println("Number of nodes online -> " + size)
+    for (i <- Range(0, size)) {
+      val a = it1.next()
+      val b = it2.next()
+      val aPeer = actors(a).asInstanceOf[PastryPeer]
+      val bPeer = actors(b).asInstanceOf[PastryPeer]
+      println(a + " <-> " + b)
+      println(aPeer.ls.bigger + " <-> " + bPeer.ls.smaller)
+    }
+  }
 }

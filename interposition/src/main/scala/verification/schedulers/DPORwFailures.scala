@@ -67,6 +67,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
   val quiescentPeriod = new HashMap[Unique, Int]
   
   val backTrack = new HashMap[Int, HashMap[(Unique, Unique), List[Unique]] ]
+  val backTrackSet = new HashMap[Int, HashSet[(Unique, Unique)] ]
+
   var invariant : Queue[Unique] = Queue()
   var exploredTacker = new ExploredTacker
   
@@ -388,7 +390,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   
   def event_consumed(cell: ActorCell, envelope: Envelope) = {
-    invariantChecker.messageConsumed(cell, envelope)
   }
   
   
@@ -540,6 +541,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   // Called after receive is done being processed 
   def after_receive(cell: ActorCell) {
+    invariantChecker.messageConsumed(cell, cell.currentMessage)
   }
 
   
@@ -814,8 +816,17 @@ class DPORwFailures extends Scheduler with LazyLogging {
               // safely mark the interleaving of (earlier, later) as
               // already explored.
               backTrack.getOrElseUpdate(branchI, new HashMap[(Unique, Unique), List[Unique]])
-              backTrack(branchI)((later, earlier)) = needToReplayV
+              backTrackSet.getOrElseUpdate(branchI, new HashSet[(Unique, Unique)])
+
+              if (branchI == 2) {
+                //println(backTrackSet(branchI).contains((later, earlier)))
+                //println(backTrack(branchI).contains((later, earlier)))
+                //println(later.id + ", " + earlier.id)
+                //println("!!!!!!!!!!!!!!!!! " + backTrack(branchI).size)
+              }
               
+              backTrackSet(branchI) += ((later, earlier))
+              backTrack(branchI)((later, earlier)) = needToReplayV
             case None => // Nothing
           }
           
@@ -867,6 +878,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
         exploredTacker.setExplored(maxIndex, (e1, e2))
         exploredTacker.trimExplored(maxIndex)
         exploredTacker.printExplored()
+        //println("2: " + backTrack(2).size)
         
         // A variable used to figure out if the replay diverged.
         invariant = Queue(e1, e2)

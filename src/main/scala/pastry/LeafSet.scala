@@ -11,8 +11,8 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   var smaller = scala.collection.mutable.PriorityQueue[BigInt]()(Ordering.by(x => -x))
   var bigger = scala.collection.mutable.PriorityQueue[BigInt]()(Ordering.by(x => x))
   
-  
   def values : PriorityQueue[BigInt] = smaller ++ bigger
+  
   
   override def equals (other: Any) = other match {
     case otherStruct : LeafSet => 
@@ -21,6 +21,7 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
       bigger.toArray.deep == otherStruct.bigger.toArray.deep
     case _ => false
   }
+  
   
   def foreach[U](f: BigInt => U) = 
     for(value <- smaller ++ bigger)
@@ -35,7 +36,8 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   }
   
   
-  def closest(key: BigInt) : Option[BigInt] = {
+  def closest(rawKey: BigInt) : Option[BigInt] = {
+    val key = rawKey % modulo
     assert(key != myID)
     
     key < myID match {
@@ -58,19 +60,18 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   }
   
   
-  
   def steal(other: LeafSet) : Unit =
     for(value <- other.bigger ++ other.smaller) value match {
       case same : BigInt if same == myID =>
       case other : BigInt => this.insert(other)
       case _ => internalErrorF
     }
-   
   
   
-  
-  def insert(key: BigInt) : Unit = {
+  def insert(rawKey: BigInt) : Unit = {
+    val key = rawKey % modulo
     assert(key != myID)
+    
     if (key < myID) {
       smaller += key
       if (smaller.size > L)

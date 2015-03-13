@@ -101,11 +101,8 @@ class ResultAggregator {
   }
 }
 
-
-
-object PastryBug extends App with Config
-{
-  
+object Dump {
+    
   //val r0 = new RoutingTable(132)
   //r0.insertInt(1010)
   //val r1 = new RoutingTable(132)
@@ -117,6 +114,11 @@ object PastryBug extends App with Config
   //val r1 = new LeafSet(132)
   //r1.insert(1010)
   //r1.insert(1011)
+}
+
+object PastryBug extends App with Config
+{
+
 
   val collector = new ResultAggregator
   val scheduler = new DPORwFailures
@@ -129,17 +131,22 @@ object PastryBug extends App with Config
   val logger = Logger(LoggerFactory.getLogger("pastry"))
   val system = ActorSystem("pastry")
   
-  val bootstrapID : BigInt = 54615
+  val bootstrapID : BigInt = 1
   val bootstrapSpawn = Start(Props[PastryPeer], name = toBase(bootstrapID))
   val bootstrapInit = Send(toBase(bootstrapID), () => Bootstrap(bootstrapID, bootstrapID))
   
+  val bootstrapID2 : BigInt = 10
+  val bootstrapSpawn2 = Start(Props[PastryPeer], name = toBase(bootstrapID2))
+  val bootstrapInit2 = Send(toBase(bootstrapID2), () => Bootstrap(bootstrapID2, bootstrapID))
+  
   //val otherIDs : List[BigInt] = List(1, 3, 1234599, 5423)
-  val otherIDs : List[BigInt] = List(1, 3, 1234599, 5423)
+  val otherIDs : List[BigInt] = List(3)
   val otherSpawns = otherIDs.map(i => Start(Props[PastryPeer], toBase(i)))
   val otherInits = otherIDs.map(id => Send(toBase(id), () => Bootstrap(id, bootstrapID)))
 
   val externalEvents : Vector[ExternalEvent] = (Vector() :+
-    bootstrapSpawn :+ bootstrapInit :+ WaitQuiescence) ++ otherSpawns ++ otherInits
+    bootstrapSpawn :+ bootstrapInit :+ WaitQuiescence :+ 
+    bootstrapSpawn2 :+ bootstrapInit2 :+ WaitQuiescence) ++ otherSpawns ++ otherInits
     
   scheduler.run(
       externalEvents, 

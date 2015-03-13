@@ -238,6 +238,7 @@ object Util {
       event.value match {
         case Unique(msg : MsgEvent, id) => id.toString()
         case Unique(spawn : SpawnEvent, id) => id.toString()
+        case Unique(WaitQuiescence, id) => id.toString()
       }
     }
         
@@ -247,6 +248,7 @@ object Util {
       val descr = innerNode.value match {
         case u @ Unique(msg : MsgEvent, id) => DotNodeStmt( nodeStr(u), Seq.empty[DotAttr])
         case u @ Unique(spawn : SpawnEvent, id) => DotNodeStmt( nodeStr(u), Seq(DotAttr("color", "red")))
+        case u @ Unique(WaitQuiescence, id) => DotNodeStmt( nodeStr(u), Seq(DotAttr("color", "blue")))
       }
 
       Some(root, descr)
