@@ -3,7 +3,8 @@ package akka.dispatch.verification
 import pastry._
 
 import scala.collection.mutable.HashMap,
-       scala.collection.mutable.HashSet
+       scala.collection.mutable.HashSet,
+       scala.collection.mutable.ArrayBuffer
 
 import akka.actor.ActorCell,
        akka.actor.ActorSystem,
@@ -14,6 +15,7 @@ import akka.dispatch.Envelope,
        akka.dispatch.MessageQueue,
        akka.dispatch.MessageDispatcher
 
+case class PastryNeighInvariant() extends Invariant
 
 
 class PastryInvariantChecker extends InvariantChecker {
@@ -31,12 +33,14 @@ class PastryInvariantChecker extends InvariantChecker {
     onlineSet.clear()
   }
   
-  def messageProduced(cell: ActorCell, envelope: Envelope) {
-   
+  def messageProduced(cell: ActorCell, envelope: Envelope) : Seq[Option[Invariant]] = {
+    return ArrayBuffer(None)
   }
   
-  def messageConsumed(cell: ActorCell, envelope: Envelope) {
-    invariantOverlap(cell, envelope)
+  def messageConsumed(cell: ActorCell, envelope: Envelope) : Seq[Option[Invariant]] = {
+    val results = new ArrayBuffer[Option[Invariant]]
+    results += invariantOverlap(cell, envelope)
+    return results
   }
   
   
@@ -46,7 +50,7 @@ class PastryInvariantChecker extends InvariantChecker {
    * Therefore, no overlap between key-spaces of two 
    * adjacent nodes must exist.
    */
-  def invariantOverlap(cell: ActorCell, envelope: Envelope) {
+  def invariantOverlap(cell: ActorCell, envelope: Envelope) : Option[Invariant] = {
     
     val newOnlineSet = new HashSet[String]
     
@@ -60,18 +64,16 @@ class PastryInvariantChecker extends InvariantChecker {
     }
         
     
-    if (onlineSet == newOnlineSet) return
+    if (onlineSet == newOnlineSet) return None
     
     onlineSet = newOnlineSet
-    
-    
-    invariantOverlapImpl()
+    return invariantOverlapImpl()
   }
   
   
-  def invariantOverlapImpl() {
+  def invariantOverlapImpl() : Option[Invariant] = {
     val size = onlineSet.size
-    if (size <= 1) return
+    if (size <= 1) return None
     
     val array = onlineSet.toList.sortBy { x => x }
     val it1 = Iterator.continually(array).flatten
@@ -85,14 +87,15 @@ class PastryInvariantChecker extends InvariantChecker {
       val aConfig = actors(a).asInstanceOf[Config]
       val bPeer = actors(b).asInstanceOf[PastryPeer]
       val bConfig = actors(b).asInstanceOf[Config]
-      
 
       println(aPeer.ls.leftNeighStr + ":" + aPeer.myIDStr + ":" + aPeer.ls.rightNeighStr + " <-> " + 
               bPeer.ls.leftNeighStr + ":" + bPeer.myIDStr + ":" + bPeer.ls.rightNeighStr)
               
-      assert(aPeer.ls.rightNeighStr == bPeer.myIDStr)
-      assert(aPeer.myIDStr == bPeer.ls.leftNeighStr)
-      
+      if(aPeer.ls.rightNeighStr != bPeer.myIDStr) return Some(PastryNeighInvariant())
+      if(aPeer.myIDStr != bPeer.ls.leftNeighStr) return Some(PastryNeighInvariant())
     }
+    
+  return None
   }
+  
 }

@@ -427,7 +427,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
   
   def runExternal() = {
-    logger.debug(Console.RED + " RUN EXTERNAL CALLED initial IDX = " + externalEventIdx +Console.RESET) 
+    //logger.debug(Console.RED + "RUN EXTERNAL CALLED initial IDX = " + externalEventIdx +Console.RESET) 
    
     var await = false
     while (externalEventIdx < externalEventList.length && !await) {
@@ -459,7 +459,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       externalEventIdx += 1
     }
     
-    logger.debug(Console.RED + " RUN EXTERNAL LOOP ENDED idx = " + externalEventIdx + Console.RESET) 
+    //logger.debug(Console.RED + "RUN EXTERNAL LOOP ENDED idx = " + externalEventIdx + Console.RESET) 
     
     instrumenter().tellEnqueue.await()
     
@@ -527,7 +527,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
         val newMsg = Unique( MsgEvent(msg.sender, msg.receiver, msg.msg) )
         logger.trace(
             Console.YELLOW + "Not seen: " + newMsg.id + 
-            " (" + msg.sender + " -> " + msg.receiver + ") " + Console.RESET)
+            " (" + msg.sender + " -> " + msg.receiver + ") " + msg + Console.RESET)
         return newMsg
       case _ => throw new Exception("wrong type")
     }
@@ -541,7 +541,12 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   // Called after receive is done being processed 
   def after_receive(cell: ActorCell) {
-    invariantChecker.messageConsumed(cell, cell.currentMessage)
+    invariantChecker.messageConsumed(cell, cell.currentMessage) match {
+      case Seq(None) =>
+      case problem => logger.debug(Console.BLINK + Console.RED + 
+          "Invariant broken!" +
+          Console.RESET)
+    }
   }
 
   
@@ -563,9 +568,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
     
     if (awaitingQuiescence) {
       awaitingQuiescence = false
-      logger.trace(Console.BLUE + " Done waiting for quiescence " + Console.RESET)
-
-      println(scheduledEvent)
+      logger.trace(Console.BLUE + "Done waiting for quiescence " + Console.RESET)
+      
       parentEvent = scheduledEvent
       
       currentQuiescentPeriod = nextQuiescentPeriod

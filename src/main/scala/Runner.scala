@@ -121,26 +121,32 @@ object PastryBug extends App with Config
   val bootstrapSpawn = Start(Props[PastryPeer], name = toBase(bootstrapID))
   val bootstrapInit = Send(toBase(bootstrapID), () => Bootstrap(bootstrapID, bootstrapID))
   
-  val bootstrapID2 : BigInt = 10
-  val bootstrapSpawn2 = Start(Props[PastryPeer], name = toBase(bootstrapID2))
-  val bootstrapInit2 = Send(toBase(bootstrapID2), () => Bootstrap(bootstrapID2, bootstrapID))
+  val peerID1 : BigInt = 10
+  val peerSpawn1 = Start(Props[PastryPeer], name = toBase(peerID1))
+  val peerInit1 = Send(toBase(peerID1), () => Bootstrap(peerID1, bootstrapID))
   
-  val bootstrapID3 : BigInt = 3
-  val bootstrapSpawn3 = Start(Props[PastryPeer], name = toBase(bootstrapID3))
-  val bootstrapInit3 = Send(toBase(bootstrapID3), () => Bootstrap(bootstrapID3, bootstrapID))
+  val peerID2 : BigInt = 3
+  val peerSpawn2 = Start(Props[PastryPeer], name = toBase(peerID2))
+  val peerInit2 = Send(toBase(peerID2), () => Bootstrap(peerID2, bootstrapID))
   
-  val bootstrapID4 : BigInt = 5
-  val bootstrapSpawn4 = Start(Props[PastryPeer], name = toBase(bootstrapID4))
-  val bootstrapInit4 = Send(toBase(bootstrapID4), () => Bootstrap(bootstrapID4, bootstrapID))
+  val peerID3 : BigInt = 5
+  val peerSpawn3 = Start(Props[PastryPeer], name = toBase(peerID3))
+  val peerInit3 = Send(toBase(peerID3), () => Bootstrap(peerID3, bootstrapID))
 
+  val peerID4 : BigInt = 20
+  val peerSpawn4 = Start(Props[PastryPeer], name = toBase(peerID4))
+  val peerInit4 = Send(toBase(peerID4), () => Bootstrap(peerID4, bootstrapID))
+  
   val externalEvents : Vector[ExternalEvent] = (Vector() :+
     bootstrapSpawn :+ bootstrapInit :+ 
     WaitQuiescence :+ 
-    bootstrapSpawn2 :+ bootstrapInit2 :+ 
+    peerSpawn1 :+ peerInit1 :+ 
     WaitQuiescence :+
-    bootstrapSpawn3 :+ bootstrapInit3 :+ 
-    WaitQuiescence :+
-    bootstrapSpawn4 :+ bootstrapInit4
+    peerSpawn2 :+ peerInit2 :+ 
+    //WaitQuiescence :+
+    peerSpawn3 :+ peerInit3
+    //WaitQuiescence :+
+    //peerSpawn4 :+ peerInit4
     )
     
   scheduler.run(

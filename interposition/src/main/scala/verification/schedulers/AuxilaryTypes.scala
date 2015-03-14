@@ -6,6 +6,7 @@ import akka.dispatch.{Envelope}
 // External events used to specify a trace
 abstract trait ExternalEvent
 abstract trait Event
+abstract trait Invariant
 
 final case class Start (propCtor: () => Props, name: String) extends Event with ExternalEvent
 final case class Kill (name: String) extends Event with ExternalEvent {}

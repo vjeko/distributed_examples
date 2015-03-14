@@ -15,14 +15,14 @@ import akka.dispatch.Envelope,
 trait InvariantChecker {
   def init(actorMap: HashMap[String, Any])
   def newRun()
-  def messageProduced(cell: ActorCell, envelope: Envelope)
-  def messageConsumed(cell: ActorCell, envelope: Envelope)
+  def messageProduced(cell: ActorCell, envelope: Envelope) : Seq[Option[Invariant]]
+  def messageConsumed(cell: ActorCell, envelope: Envelope) : Seq[Option[Invariant]]
 }
 
 
 class NullInvariantChecker extends InvariantChecker {
   def init(actorMap: HashMap[String, Any]) {}
   def newRun() {}
-  def messageProduced(cell: ActorCell, envelope: Envelope) {}
-  def messageConsumed(cell: ActorCell, envelope: Envelope) {}
+  def messageProduced(cell: ActorCell, envelope: Envelope) : Seq[Option[Invariant]] = { return List(None) }
+  def messageConsumed(cell: ActorCell, envelope: Envelope) : Seq[Option[Invariant]] = { return List(None) }
 }
