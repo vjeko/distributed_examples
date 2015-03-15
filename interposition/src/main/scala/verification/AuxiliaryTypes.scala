@@ -6,7 +6,8 @@ import akka.dispatch.{ Envelope }
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.Semaphore,
        scala.collection.mutable.HashMap,
-       scala.collection.mutable.HashSet
+       scala.collection.mutable.HashSet,
+       scala.collection.mutable.Queue
 
 
 object IDGenerator {
@@ -164,6 +165,7 @@ class TellEnqueueSemaphore extends Semaphore(1) with TellEnqueue {
 
 class ExploredTacker {
   var exploredStack = new HashMap[Int, HashSet[(Unique, Unique)] ]
+  val exploredSeq = new HashSet[Vector[Int]]
   
   def setExplored(index: Int, pair: (Unique, Unique)) =
   exploredStack.get(index) match {
@@ -173,20 +175,27 @@ class ExploredTacker {
       exploredStack(index) = newElem
   }
   
-  def isExplored(pair: (Unique, Unique)): Boolean = {
+  def isExplored(pair: (Unique, Unique), seq: Queue[Unique]): Boolean = {
 
     for ((index, set) <- exploredStack) set.contains(pair) match {
       case true => return true
       case false =>
     }
 
+    val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
+    println("\tNEXT TRACE " + nextTrace)
+    if(exploredSeq contains nextTrace)
+      return true
+      
+    exploredSeq += nextTrace
+    
     return false
   }
   
   def trimExplored(index: Int) = {
     exploredStack = exploredStack.filter { other => other._1 <= index }
   }
-
+ 
   
   def printExplored() = {
     for ((index, set) <- exploredStack.toList.sortBy(t => (t._1))) {

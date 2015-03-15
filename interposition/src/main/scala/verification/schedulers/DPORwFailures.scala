@@ -840,7 +840,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
     }
     
     def getNext() : Option[(Int, (Unique, Unique), Seq[Unique])] = {
-            // If the backtrack set is empty, this means we're done.
+      
+      // If the backtrack set is empty, this means we're done.
       if (backTrack.isEmpty) {
         logger.info("Tutto finito!")
         done(this)
@@ -864,7 +865,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       val ((e1, e2), replayThis) = backTrack(maxIndex).head
       backTrack(maxIndex).remove((e1, e2))
       
-      exploredTacker.isExplored((e1, e2)) match {
+      exploredTacker.isExplored((e1, e2), trace.take(maxIndex + 1) ++ replayThis) match {
         case true => return getNext()
         case false => return Some((maxIndex, (e1, e2), replayThis))
       }

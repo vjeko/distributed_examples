@@ -108,8 +108,14 @@ class PastryPeer extends Actor with Config with ActorObserver {
   }
   
   
-  def handleJoin(sender : ActorRef, msg : JoinRequest) = {
+  def handleJoin(sender : ActorRef, msg : JoinRequest) {
     assertions(msg)
+    
+    if(msg.visitedPeers contains myID) {
+      logger.error(myIDStr + ": " + "Loop created! Aborting. Visited nodes: " 
+          + msg.visitedPeers)
+      return
+    }
     
     val newPeer = msg.newPeer
     getNext(newPeer) match {
