@@ -139,14 +139,14 @@ object PastryBug extends App with Config
   
   val externalEvents : Vector[ExternalEvent] = (Vector() :+
     bootstrapSpawn :+ bootstrapInit :+ 
-    WaitQuiescence :+ 
+    new WaitQuiescence() :+ 
     peerSpawn1 :+ peerInit1 :+ 
-    WaitQuiescence :+
+    new WaitQuiescence() :+
     peerSpawn2 :+ peerInit2 :+ 
     //WaitQuiescence :+
-    peerSpawn3 :+ peerInit3
+    peerSpawn3 :+ peerInit3 :+
     //WaitQuiescence :+
-    //peerSpawn4 :+ peerInit4
+    peerSpawn4 :+ peerInit4
     )
     
   scheduler.run(

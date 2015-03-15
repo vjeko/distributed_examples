@@ -122,7 +122,8 @@ class PastryPeer extends Actor with Config with ActorObserver {
   def handleStateRequest(sender : ActorRef, msg : StateRequest) = {
     assertions(msg)
     
-    val reply = StateReply(myID, msg.sender, rt.clone(), ls.clone())
+    //val reply = StateReply(myID, msg.sender, rt.clone(), ls._toSet)
+    val reply = StateReply(myID, msg.sender, new RoutingTable(myID), ls._toSet)
     getRef(msg.sender) ! reply
   }
   
@@ -143,7 +144,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     ls.insert(sender)
     
     rt.steal(msg.rt)
-    ls.steal(msg.ls)
+    ls._fromSet(msg.ls)
     
     getRef(sender) ! PushStateAck(myID, msg)
     
@@ -166,7 +167,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     ls.insert(sender)
     
     rt.steal(msg.rt)
-    ls.steal(msg.ls)
+    ls._fromSet(msg.ls)
     
     if (state == State.Joining) {
       assert(barrier contains sender) 
@@ -203,7 +204,8 @@ class PastryPeer extends Actor with Config with ActorObserver {
     
     
     for (peer <- originalAckBarrier) {
-      getRef(peer) ! PushState(myID, peer, rt.clone(), ls.clone())
+      //getRef(peer) ! PushState(myID, peer, rt.clone(), ls._toSet)
+      getRef(peer) ! PushState(myID, peer, new RoutingTable(myID), ls._toSet)
     }
    }
 

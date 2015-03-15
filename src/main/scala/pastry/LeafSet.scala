@@ -28,6 +28,17 @@ class LeafSet(ID : BigInt) extends Config with Traversable[BigInt] {
   }
   
   
+  def _fromSet(seq : scala.collection.immutable.Set[Int]) =
+    for (value <- seq) value match {
+      case same if same % modulo == myID % modulo =>
+      case other => insert(other)
+    }
+  
+  
+  def _toSet : scala.collection.immutable.Set[Int] =
+    return left.toSet ++ right.toSet
+  
+  
   def leftNeighStr = toBase(leftNeigh)
   def leftNeigh : Int = {
     val col = left.clone().dequeueAll

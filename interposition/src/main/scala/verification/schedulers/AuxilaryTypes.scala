@@ -13,7 +13,7 @@ final case class Kill (name: String) extends Event with ExternalEvent {}
 // Allow the client to late-bind the construction of the message. Invoke the
 // function at the point that the Send is about to be injected.
 final case class Send (name: String, messageCtor: () => Any) extends Event with ExternalEvent
-final case object WaitQuiescence extends Event with ExternalEvent
+final case class WaitQuiescence() extends Event with ExternalEvent
 // Wait for numTimers currently queued timers to be scheduled. numTimers can be set to
 // -1 to wait for all currently queued timers.
 final case class WaitTimers(numTimers: Integer) extends Event with ExternalEvent

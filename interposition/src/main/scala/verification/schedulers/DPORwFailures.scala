@@ -75,7 +75,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
   val currentTrace = new Queue[Unique]
   val nextTrace = new Queue[Unique]
   
-  var parentEvent = getRootRootEvent
+  var parentEvent = getRootRootEvent()
   var scheduledEvent : Unique = null
   
   val reachabilityMap = new HashMap[String, Set[String]]
@@ -91,10 +91,10 @@ class DPORwFailures extends Scheduler with LazyLogging {
   def nullFunPost(trace: Queue[Unique]) : Unit = {}
   def nullFunDone(s :Scheduler) : Unit = {}
   
-  private[this] def awaitQuiescenceUpdate (nextEvent:Unique) = { 
+  private[this] def awaitQuiescenceUpdate(nextEvent: Unique) = { 
     logger.trace(Console.BLUE + "Beginning to wait for quiescence " + Console.RESET)
     nextEvent match {
-      case Unique(WaitQuiescence, id) =>
+      case Unique(q: WaitQuiescence, id) =>
         awaitingQuiescence = true
         nextQuiescentPeriod = id
         quiescentMarker = nextEvent
@@ -119,7 +119,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
     child.outNeighbors match {
       case parents if parents.isEmpty => return child
       case parents if parents.size == 1 => return getRootEvent(parents.head)
-      case _ => throw new Exception("not a tree")
+      case error => throw new Exception("not a tree " + error)
     }
   }
   
@@ -250,7 +250,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
               id + Console.RESET)
           Some(par)
 
-        case Some(qui @ (Unique(WaitQuiescence, id), _, _)) =>
+        case Some(qui @ (Unique(q: WaitQuiescence, id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing the high level quiescence event " +
               id + Console.RESET)
           Some(qui)
@@ -280,7 +280,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
             case None =>  None
           }
 
-        case Some(u @ Unique(WaitQuiescence, _)) => // Look at the pending events to see if such message event exists. 
+        case Some(u @ Unique(WaitQuiescence(), _)) => // Look at the pending events to see if such message event exists. 
           pendingEvents.get(SCHEDULER) match {
             case Some(queue) => queue.dequeueFirst(equivalentTo(u, _))
             case None =>  None
@@ -320,7 +320,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
                 + part1 + " <-> " + part2 + ")" + Console.RESET )
             Some((u, null, null))
 
-          case Some((u @ Unique(WaitQuiescence, id), _, _)) =>
+          case Some((u @ Unique(WaitQuiescence(), id), _, _)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Quiescence: (" 
                 + id +  ")" + Console.RESET )
             Some((u, null, null))
@@ -368,9 +368,10 @@ class DPORwFailures extends Scheduler with LazyLogging {
         currentTrace += nextEvent
         return schedule_new_message()
 
-      case Some((nextEvent @ Unique(WaitQuiescence, nID), _, _)) =>
+      case Some((nextEvent @ Unique(q @ WaitQuiescence(), nID), _, _)) =>
         awaitQuiescenceUpdate(nextEvent)
-        scheduledEvent = nextEvent
+        parentEvent = nextEvent
+        //scheduledEvent = nextEvent
         return schedule_new_message()
         
       case _ => return None
@@ -446,10 +447,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
           pendingEvents(SCHEDULER) = msgs += ((uniq, null, null))
           addGraphNode(uniq)
        
-        case event @ Unique(WaitQuiescence, _) =>
+        case event @ Unique(q: WaitQuiescence, _) =>
           val msgs = pendingEvents.getOrElse(SCHEDULER, new Queue[(Unique, ActorCell, Envelope)])
           pendingEvents(SCHEDULER) = msgs += ((event, null, null))
           addGraphNode(event)
+          depGraph.addEdge(event, getRootRootEvent())(DiEdge)
           await = true
 
         // A unique ID needs to be associated with all network events.
@@ -484,8 +486,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
       case par: NetworkPartition => 
         val unique = Unique(par)
         unique
-      case WaitQuiescence =>
-        Unique(WaitQuiescence)
+      case q: WaitQuiescence =>
+        Unique(q)
       case other => other
     } }
     
@@ -515,8 +517,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
     
     val parent = parentEvent match {
       case u @ Unique(m: MsgEvent, id) => u
-      case u @ Unique(WaitQuiescence, id) => u
-      case _ => throw new Exception("parent event not a message")
+      case u @ Unique(q: WaitQuiescence, id) => u
+      case error => throw new Exception("parent event not a message " + error)
     }
     
     val inNeighs = depGraph.get(parent).inNeighbors
@@ -555,7 +557,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
     for(node <- path) {
       node.value match {
         case Unique(m : MsgEvent, id) => pathStr += id + " "
-        case Unique(WaitQuiescence, id) => pathStr += id + " "
+        case Unique(q: WaitQuiescence, id) => pathStr += id + " "
         case _ => throw new Exception("internal error not a message")
       }
     }
@@ -569,8 +571,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
     if (awaitingQuiescence) {
       awaitingQuiescence = false
       logger.trace(Console.BLUE + "Done waiting for quiescence " + Console.RESET)
-      
-      parentEvent = scheduledEvent
       
       currentQuiescentPeriod = nextQuiescentPeriod
       nextQuiescentPeriod = 0
@@ -766,8 +766,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
       case (Unique(p : NetworkPartition, _), _) => true
       case (_, Unique(p : NetworkPartition, _)) => true
       // Quiescence is never co-enabled
-      case (Unique(WaitQuiescence, _), _) => false
-      case (_, Unique(WaitQuiescence, _)) => false
+      case (Unique(q: WaitQuiescence, _), _) => false
+      case (_, Unique(q: WaitQuiescence, _)) => false
       //case (_, _) =>
       case (Unique(m1 : MsgEvent, _), Unique(m2 : MsgEvent, _)) =>
         if (m1.receiver != m2.receiver) 
