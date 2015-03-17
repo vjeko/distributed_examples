@@ -112,7 +112,7 @@ object PastryBug extends App with Config
   scheduler.invariantChecker = new PastryInvariantChecker
   
   Instrumenter().scheduler = scheduler
-  Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait
+  //Instrumenter().tellEnqueue = new akka.dispatch.verification.TellEnqueueBusyWait
   
   val logger = Logger(LoggerFactory.getLogger("pastry"))
   val system = ActorSystem("pastry")

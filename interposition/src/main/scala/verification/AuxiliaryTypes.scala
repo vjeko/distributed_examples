@@ -25,12 +25,9 @@ final case class Unique(
 ) extends ExternalEvent {
   
   override def equals (other: Any) = other match {
-    case u: Unique if (u.id == this.id || u.event.equals(this.event)) =>
-        true
+    case u: Unique if (u.id == this.id) => true
     case u: Unique => false
-    case _ =>
-      println("??? " + other)
-      throw new Exception("not a Unique event")
+    case _ => throw new Exception("not a Unique event")
   }
   
 }
@@ -92,12 +89,6 @@ object MessageTypes {
   }
 }
 
-object ActorTypes {
-  def systemActor(name: String) : Boolean = {
-    return name == FailureDetector.fdName || name == CheckpointSink.name
-  }
-}
-
 
 trait TellEnqueue {
   def tell()
@@ -105,6 +96,7 @@ trait TellEnqueue {
   def reset()
   def await ()
 }
+
 
 class TellEnqueueBusyWait extends TellEnqueue {
   
@@ -163,6 +155,7 @@ class TellEnqueueSemaphore extends Semaphore(1) with TellEnqueue {
   }
 }
 
+
 class ExploredTacker {
   var exploredStack = new HashMap[Int, HashSet[(Unique, Unique)] ]
   val exploredSeq = new HashSet[Vector[Int]]
@@ -182,12 +175,12 @@ class ExploredTacker {
       case false =>
     }
 
-    val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
-    println("\tNEXT TRACE " + nextTrace)
-    if(exploredSeq contains nextTrace)
-      return true
+    //val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
+    //println("\tNEXT TRACE " + nextTrace)
+    //if(exploredSeq contains nextTrace)
+    //  return true
       
-    exploredSeq += nextTrace
+    //exploredSeq += nextTrace
     
     return false
   }

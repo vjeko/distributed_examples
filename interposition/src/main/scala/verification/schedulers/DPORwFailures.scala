@@ -35,6 +35,7 @@ import com.typesafe.scalalogging.LazyLogging,
 object ActorRegistry {
   val actors = new HashMap[String, Any]
 }
+
        
 trait ActorObserver {
   assert(this.isInstanceOf[Actor], "not an actor")
@@ -65,6 +66,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
   val depGraph = Graph[Unique, DiEdge]()
 
   val quiescentPeriod = new HashMap[Unique, Int]
+  
+  val progress1, progress2 = new HashSet[(Unique, Unique)]
   
   val backTrack = new HashMap[Int, HashMap[(Unique, Unique), List[Unique]] ]
   val backTrackSet = new HashMap[Int, HashSet[(Unique, Unique)] ]
@@ -450,8 +453,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
         case event @ Unique(q: WaitQuiescence, _) =>
           val msgs = pendingEvents.getOrElse(SCHEDULER, new Queue[(Unique, ActorCell, Envelope)])
           pendingEvents(SCHEDULER) = msgs += ((event, null, null))
+          
           addGraphNode(event)
           depGraph.addEdge(event, getRootRootEvent())(DiEdge)
+
+          
           await = true
 
         // A unique ID needs to be associated with all network events.
@@ -529,7 +535,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
         val newMsg = Unique( MsgEvent(msg.sender, msg.receiver, msg.msg) )
         logger.trace(
             Console.YELLOW + "Not seen: " + newMsg.id + 
-            " (" + msg.sender + " -> " + msg.receiver + ") " + msg + Console.RESET)
+            " (" + msg.sender + " -> " + msg.receiver + ") " + msg + "\n" + parentEvent + Console.RESET)
         return newMsg
       case _ => throw new Exception("wrong type")
     }
@@ -543,21 +549,33 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   // Called after receive is done being processed 
   def after_receive(cell: ActorCell) {
+    /*
     invariantChecker.messageConsumed(cell, cell.currentMessage) match {
       case Seq(None) =>
       case problem => logger.debug(Console.BLINK + Console.RED + 
           "Invariant broken!" +
           Console.RESET)
-    }
+    }*/
   }
 
+  def printPath2(path : Queue[Unique]) : String = {
+    var pathStr = ""
+    for(node <- path) {
+      node match {
+        case Unique(m : MsgEvent, id) => pathStr += id + " "
+        case Unique(q : WaitQuiescence, id) => pathStr += id + " "
+        case _ => throw new Exception("internal error not a message")
+      }
+    }
+    return pathStr
+  }
   
   def printPath(path : List[depGraph.NodeT]) : String = {
     var pathStr = ""
     for(node <- path) {
       node.value match {
         case Unique(m : MsgEvent, id) => pathStr += id + " "
-        case Unique(q: WaitQuiescence, id) => pathStr += id + " "
+        case Unique(q : WaitQuiescence, id) => pathStr += id + " "
         case _ => throw new Exception("internal error not a message")
       }
     }
@@ -574,8 +592,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
       
       currentQuiescentPeriod = nextQuiescentPeriod
       nextQuiescentPeriod = 0
-
-      addGraphNode(quiescentMarker)
+      
+      parentEvent = quiescentMarker
       currentTrace += quiescentMarker
       quiescentMarker = null
 
@@ -586,7 +604,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
       logger.info("\n--------------------- Interleaving #" +
                   interleavingCounter + " ---------------------")
       
-      //if (interleavingCounter > 0) System.exit(0)
                   
       logger.debug(Console.BLUE + "Current trace: " +
           Util.traceStr(currentTrace) + Console.RESET)
@@ -715,8 +732,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
             case None => throw new Exception("no such path")
           }
           
-          //println("earlierPath " + printPath(earlierPath))
-          //println("laterPath   " + printPath(laterPath))
 
           // Find the common prefix for the above paths.
           val commonPrefix = laterPath.intersect(earlierPath)
@@ -732,9 +747,13 @@ class DPORwFailures extends Scheduler with LazyLogging {
             .drop(branchI + 1)
             .dropRight(currentTrace.size - laterI - 1)
             .filter { x => x.id != earlier.id }
-
+          
+          //println("earlierPath  " + printPath(earlierPath))
+          //println("laterPath    " + printPath(laterPath))
+          //println("needToReplay " + printPath2(needToReplay))
+          
           require(branchI < laterI)
-
+          
           // Since we're dealing with the vertices and not the
           // events, we need to extract the values.
           val needToReplayV = needToReplay.toList
@@ -831,6 +850,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
               
               backTrackSet(branchI) += ((later, earlier))
               backTrack(branchI)((later, earlier)) = needToReplayV
+              if (branchI == 10) {
+                progress2 += ((later, earlier))
+              }
             case None => // Nothing
           }
           
@@ -864,6 +886,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
       
       val ((e1, e2), replayThis) = backTrack(maxIndex).head
       backTrack(maxIndex).remove((e1, e2))
+      if (maxIndex == 10) {
+        progress1 += ((e1, e2))
+      }
       
       exploredTacker.isExplored((e1, e2), trace.take(maxIndex + 1) ++ replayThis) match {
         case true => return getNext()
@@ -883,7 +908,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
         exploredTacker.setExplored(maxIndex, (e1, e2))
         exploredTacker.trimExplored(maxIndex)
         exploredTacker.printExplored()
-        //println("2: " + backTrack(2).size)
+        if (progress1.size != 0)
+        println("Progress: " + progress1.size  + " / " + progress2.size + " == " + (progress1.size : Float) / progress2.size * 100  )
         
         // A variable used to figure out if the replay diverged.
         invariant = Queue(e1, e2)
