@@ -175,12 +175,13 @@ class ExploredTacker {
       case false =>
     }
 
-    //val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
+    val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
     //println("\tNEXT TRACE " + nextTrace)
-    //if(exploredSeq contains nextTrace)
-    //  return true
+    
+    if(exploredSeq contains nextTrace)
+      return true
       
-    //exploredSeq += nextTrace
+    exploredSeq += nextTrace
     
     return false
   }
