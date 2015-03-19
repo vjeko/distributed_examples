@@ -186,20 +186,32 @@ class DPORwFailures extends Scheduler with LazyLogging {
   def mutableTraceIterator( trace: Queue[Unique]) : Option[Unique] =
   trace.isEmpty match {
     case true => return None
-    case _ => return Some(trace.dequeue)
+    case _ =>
+      val ret = trace.head
+      println("************* dequeueing " + ret)
+      return Some(ret)
   }
   
   
 
+  def dequeueNextTraceMessage() {
+    nextTrace.dequeue()
+  }
+  
   // Get next message event from the trace.
   def getNextTraceMessage() : Option[Unique] = 
   mutableTraceIterator(nextTrace) match {
     // All spawn events are ignored.
-    case some @ Some(Unique(s: SpawnEvent, id)) => getNextTraceMessage()
+    case some @ Some(Unique(s: SpawnEvent, id)) =>
+      nextTrace.dequeue()
+      getNextTraceMessage()
     // All system messages need to ignored.
-    case some @ Some(Unique(t, 0)) => getNextTraceMessage()
-    case some @ Some(Unique(t, id)) => some
-    case None => None
+    case some @ Some(Unique(t, 0)) => 
+      nextTrace.dequeue()
+      getNextTraceMessage()
+    case some @ Some(Unique(t, id)) => 
+      return some
+    case None => return None
     case _ => throw new Exception("internal error")
   }
 
@@ -241,8 +253,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
     // Get from the current set of pending events.
     def getPendingEvent(): Option[(Unique, ActorCell, Envelope)] = {
       
+      
       // Do we have some pending events
-      Util.dequeueOne(pendingEvents) match {
+      Util.dequeueOne(pendingEvents, nextTrace.drop(1).toSet) match {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
               //+ "(" + snd + " -> " + rcv + ") " +  + id  + " " + msg + " -> " + depGraph.get(u).outNeighbors+ Console.RESET )
@@ -271,7 +284,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
         case Some(u @ Unique(MsgEvent(snd, rcv, msg), id)) =>
 
           // Look at the pending events to see if such message event exists.
-          println("matching on " + u)
           pendingEvents.get(rcv) match {
             case Some(queue) =>
               println("Queue: " + queue)
@@ -287,7 +299,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
           }
 
         case Some(u @ Unique(WaitQuiescence(), _)) => // Look at the pending events to see if such message event exists.
-          println("matching on " + u)
           pendingEvents.get(SCHEDULER) match {
             case Some(queue) => queue.dequeueFirst(equivalentTo(u, _))
             case None =>  None
@@ -320,16 +331,19 @@ class DPORwFailures extends Scheduler with LazyLogging {
           case m @ Some((u @ Unique(MsgEvent(snd, rcv, msg), id), cell, env)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Message: " +
                 "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
+            dequeueNextTraceMessage()
             Some((u, cell, env))
             
           case Some((u @ Unique(NetworkPartition(part1, part2), id), _, _)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Partition: (" 
                 + part1 + " <-> " + part2 + ")" + Console.RESET )
+            dequeueNextTraceMessage()
             Some((u, null, null))
 
           case Some((u @ Unique(WaitQuiescence(), id), _, _)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Quiescence: (" 
                 + id +  ")" + Console.RESET )
+            dequeueNextTraceMessage()
             Some((u, null, null))
             
           // We call this a divergent state.
@@ -338,9 +352,13 @@ class DPORwFailures extends Scheduler with LazyLogging {
           // Something went wrong.
           case _ => throw new Exception("not a message")
         }
-      case true => // Don't call getMatchingMessage when waiting quiescence. Except when divergent or running the first
-                  // time through, there should be no pending messages, signifying quiescence. Get pending event takes
-                  // care of the first run. We could explicitly detect divergence here, but we haven't been so far.
+        
+      case true => 
+        /** 
+         *  Don't call getMatchingMessage when waiting quiescence. Except when divergent or running the first 
+         *  time through, there should be no pending messages, signifying quiescence. Get pending event takes
+         *  care of the first run. We could explicitly detect divergence here, but we haven't been so far.
+         */
         getPendingEvent()
     }
     
@@ -751,7 +769,13 @@ class DPORwFailures extends Scheduler with LazyLogging {
           val lastElement = commonPrefix.last
           val branchI = trace.indexWhere { e => (e == lastElement.value) }
 
-          val needToReplay = currentTrace.clone()
+          val needToReplay = Queue() :+ laterN.value :+ earlierN.value
+            //.drop(branchI + 1)
+            //.dropRight(currentTrace.size - branchI - 1)
+            //.filter { x => x.id != earlier.id }
+          
+          
+          val needToReplay2 = currentTrace.clone()
             .drop(branchI + 1)
             .dropRight(currentTrace.size - laterI - 1)
             .filter { x => x.id != earlier.id }

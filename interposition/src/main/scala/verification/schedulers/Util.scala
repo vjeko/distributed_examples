@@ -170,25 +170,31 @@ class VCLogger () {
 }
 
 object Util {
-
   
   // Global logger instance.
   val logger = new VCLogger()
     
-  def dequeueOne[T1, T2](outer : HashMap[T1, Queue[T2]]) : Option[T2] =
+  def dequeueOne(
+          outer: HashMap[String, Queue[(Unique, ActorCell, Envelope)]],
+          set: scala.collection.immutable.Set[Unique]
+        ) : Option[(Unique, ActorCell, Envelope)] =
     
-    outer.headOption match {
+    outer.clone().headOption match {
         case Some((receiver, queue)) =>
 
           if (queue.isEmpty == true) {
             
             outer.remove(receiver) match {
-              case Some(key) => dequeueOne(outer)
+              case Some(key) => dequeueOne(outer, set)
               case None => throw new Exception("internal error")
             }
 
           } else { 
-            return Some(queue.dequeue())
+            queue.dequeue() match {
+              case ret @ (u, _, _) if (set contains u) => dequeueOne(outer, set)
+              case ret @ (u, _, _) => return Some(ret)
+            }
+            
           }
           
        case None => None
