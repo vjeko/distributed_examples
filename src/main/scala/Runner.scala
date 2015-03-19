@@ -144,9 +144,9 @@ object PastryBug extends App with Config
     new WaitQuiescence() :+
     peerSpawn2 :+ peerInit2 :+ 
     //WaitQuiescence :+
-    peerSpawn3 :+ peerInit3 :+
+    peerSpawn3 :+ peerInit3// :+
     //WaitQuiescence :+
-    peerSpawn4 :+ peerInit4
+    //peerSpawn4 :+ peerInit4
     )
     
   scheduler.run(

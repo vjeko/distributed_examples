@@ -102,7 +102,6 @@ class Instrumenter {
   //  so this is a way to replay the first message that started it all.
   def reinitialize_system(sys: ActorSystem, argQueue: Queue[Any]) {
     require(scheduler != null)
-    println("reiniteialize")
     
     actorMappings.clear()
     seenActors.clear()

@@ -36,7 +36,7 @@ object ActorRegistry {
   val actors = new HashMap[String, Any]
 }
 
-       
+
 trait ActorObserver {
   assert(this.isInstanceOf[Actor], "not an actor")
   val actor = this.asInstanceOf[Actor]
@@ -75,7 +75,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
   var invariant : Queue[Unique] = Queue()
   var exploredTacker = new ExploredTacker
   
-  val currentTrace = new Queue[Unique]
+  var prevTrace = new Queue[Unique]
+  var currentTrace = new Queue[Unique]
   val nextTrace = new Queue[Unique]
   
   var parentEvent = getRootRootEvent()
@@ -269,21 +270,24 @@ class DPORwFailures extends Scheduler with LazyLogging {
         // The trace says there is a message event to run.
         case Some(u @ Unique(MsgEvent(snd, rcv, msg), id)) =>
 
-          // Look at the pending events to see if such message event exists. 
+          // Look at the pending events to see if such message event exists.
+          println("matching on " + u)
           pendingEvents.get(rcv) match {
-            case Some(queue) => queue.dequeueFirst(equivalentTo(u, _))
+            case Some(queue) =>
+              println("Queue: " + queue)
+              queue.dequeueFirst(equivalentTo(u, _))
             case None =>  None
           }
           
         case Some(u @ Unique(NetworkPartition(_, _), id)) =>
-          
           // Look at the pending events to see if such message event exists. 
           pendingEvents.get(SCHEDULER) match {
             case Some(queue) => queue.dequeueFirst(equivalentTo(u, _))
             case None =>  None
           }
 
-        case Some(u @ Unique(WaitQuiescence(), _)) => // Look at the pending events to see if such message event exists. 
+        case Some(u @ Unique(WaitQuiescence(), _)) => // Look at the pending events to see if such message event exists.
+          println("matching on " + u)
           pendingEvents.get(SCHEDULER) match {
             case Some(queue) => queue.dequeueFirst(equivalentTo(u, _))
             case None =>  None
@@ -617,13 +621,17 @@ class DPORwFailures extends Scheduler with LazyLogging {
           
           logger.debug(Console.BLUE + "Next trace:  " + 
               Util.traceStr(nextTrace) + Console.RESET)
+          exploredTacker.aboutToPlay(trace)
           
           parentEvent = getRootRootEvent()
 
           post(currentTrace)
           
-          pendingEvents.clear()
-          currentTrace.clear
+          assert(pendingEvents.isEmpty)
+          
+          prevTrace = currentTrace
+          currentTrace = new Queue[Unique]
+          
           currentQuiescentPeriod = 0
 
           
@@ -921,7 +929,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
         // Return all events up to the backtrack index we're interested in
         // and slap on it a new set of events that need to be replayed in
         // order to explore that interleaving.
-        return Some(trace.take(maxIndex + 1) ++ replayThis)
+        val nextSeq = trace.take(maxIndex + 1) ++ replayThis
+        return Some(nextSeq)
+        
       case None =>
         return None
     }

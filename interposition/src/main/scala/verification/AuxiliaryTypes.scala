@@ -174,16 +174,16 @@ class ExploredTacker {
       case true => return true
       case false =>
     }
+    
+    return false
+  }
+  
+  def aboutToPlay(seq: Queue[Unique]) {
 
     val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
     //println("\tNEXT TRACE " + nextTrace)
-    
-    if(exploredSeq contains nextTrace)
-      return true
-      
+    assert(!(exploredSeq contains nextTrace))
     exploredSeq += nextTrace
-    
-    return false
   }
   
   def trimExplored(index: Int) = {
