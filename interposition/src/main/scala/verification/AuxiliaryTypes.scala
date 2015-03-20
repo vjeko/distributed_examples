@@ -178,6 +178,7 @@ class ExploredTacker {
     return false
   }
   
+  
   def aboutToPlay(seq: Queue[Unique]) {
 
     val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
@@ -185,6 +186,7 @@ class ExploredTacker {
     assert(!(exploredSeq contains nextTrace))
     exploredSeq += nextTrace
   }
+  
   
   def trimExplored(index: Int) = {
     exploredStack = exploredStack.filter { other => other._1 <= index }

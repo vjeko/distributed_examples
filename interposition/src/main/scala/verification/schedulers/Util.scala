@@ -173,13 +173,41 @@ object Util {
   
   // Global logger instance.
   val logger = new VCLogger()
+  
+  type triType = (Unique, ActorCell, Envelope)
+  type keyType = String
+  type valType = Queue[triType]
+  
+  def dequeueOneIf(
+      map: HashMap[keyType, valType],
+      f: (triType => Boolean)) : Option[triType] = {
+  
+    def helper(v: valType, result: valType = Queue()) : Option[(triType, valType)] = {
+      v.headOption match {
+        case Some(even) if f(even) =>
+          return Some(even, result ++ v.tail)
+        case Some(other) => helper(v.tail, result :+ other)
+        case None => return None
+      }
+      return None
+    }
+  
+    for ((key, value) <- map) helper(value) match {
+          case Some((result, list)) => 
+            map(key) = list
+            return Some(result)
+          case None =>
+      }
     
+      return None
+  }
+  
   def dequeueOne(
           outer: HashMap[String, Queue[(Unique, ActorCell, Envelope)]],
           set: scala.collection.immutable.Set[Unique]
-        ) : Option[(Unique, ActorCell, Envelope)] =
+        ) : Option[(Unique, ActorCell, Envelope)] = { 
     
-    outer.clone().headOption match {
+    outer.headOption match {
         case Some((receiver, queue)) =>
 
           if (queue.isEmpty == true) {
@@ -190,14 +218,11 @@ object Util {
             }
 
           } else { 
-            queue.dequeue() match {
-              case ret @ (u, _, _) if (set contains u) => dequeueOne(outer, set)
-              case ret @ (u, _, _) => return Some(ret)
-            }
-            
+             return Some(queue.dequeue())
           }
           
        case None => None
+    }
   }
 
   def getElement[T1](

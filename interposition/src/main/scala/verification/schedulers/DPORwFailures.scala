@@ -95,6 +95,16 @@ class DPORwFailures extends Scheduler with LazyLogging {
   def nullFunPost(trace: Queue[Unique]) : Unit = {}
   def nullFunDone(s :Scheduler) : Unit = {}
   
+  def printQueues() = {
+        println(printPath2(nextTrace))
+        println("size: " + pendingEvents.size)
+        for((_, queue) <- pendingEvents) {
+          for ((u, _, _) <- queue)
+            println("> " + u.id)
+        } 
+  }
+  
+  
   private[this] def awaitQuiescenceUpdate(nextEvent: Unique) = { 
     logger.trace(Console.BLUE + "Beginning to wait for quiescence " + Console.RESET)
     nextEvent match {
@@ -188,10 +198,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
     case true => return None
     case _ =>
       val ret = trace.head
-      println("************* dequeueing " + ret)
       return Some(ret)
   }
-  
   
 
   def dequeueNextTraceMessage() {
@@ -250,15 +258,21 @@ class DPORwFailures extends Scheduler with LazyLogging {
     }
 
 
+    def isNotInSet(
+        set : scala.collection.immutable.Set[Unique],
+        t : (Unique, ActorCell, Envelope)) : Boolean = {
+      return !(set.map { x => x.id } contains t._1.id)
+    }
+    
     // Get from the current set of pending events.
     def getPendingEvent(): Option[(Unique, ActorCell, Envelope)] = {
       
-      
+      val f = isNotInSet(nextTrace.drop(1).toSet, _: (Unique, ActorCell, Envelope))
       // Do we have some pending events
-      Util.dequeueOne(pendingEvents, nextTrace.drop(1).toSet) match {
+      //Util.dequeueOne(pendingEvents.clone(), nextTrace.drop(1).toSet) match {
+      Util.dequeueOneIf(pendingEvents, f) match {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
-              //+ "(" + snd + " -> " + rcv + ") " +  + id  + " " + msg + " -> " + depGraph.get(u).outNeighbors+ Console.RESET )
               + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
           Some(next)
           
@@ -286,7 +300,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
           // Look at the pending events to see if such message event exists.
           pendingEvents.get(rcv) match {
             case Some(queue) =>
-              println("Queue: " + queue)
               queue.dequeueFirst(equivalentTo(u, _))
             case None =>  None
           }
@@ -321,6 +334,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
       case _ => None
     }
     
+    
+    printQueues()
     
     val result = awaitingQuiescence match {
       case false =>
@@ -645,8 +660,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
           post(currentTrace)
           
-          assert(pendingEvents.isEmpty)
-          
           prevTrace = currentTrace
           currentTrace = new Queue[Unique]
           
@@ -872,13 +885,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
               // already explored.
               backTrack.getOrElseUpdate(branchI, new HashMap[(Unique, Unique), List[Unique]])
               backTrackSet.getOrElseUpdate(branchI, new HashSet[(Unique, Unique)])
-
-              if (branchI == 2) {
-                //println(backTrackSet(branchI).contains((later, earlier)))
-                //println(backTrack(branchI).contains((later, earlier)))
-                //println(later.id + ", " + earlier.id)
-                //println("!!!!!!!!!!!!!!!!! " + backTrack(branchI).size)
-              }
               
               backTrackSet(branchI) += ((later, earlier))
               backTrack(branchI)((later, earlier)) = needToReplayV
@@ -940,6 +946,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
         exploredTacker.setExplored(maxIndex, (e1, e2))
         exploredTacker.trimExplored(maxIndex)
         exploredTacker.printExplored()
+        
         if (progress1.size != 0)
         println("Progress: " + progress1.size  + " / " + progress2.size + " == " + (progress1.size : Float) / progress2.size * 100  )
         
