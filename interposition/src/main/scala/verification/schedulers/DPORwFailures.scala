@@ -662,8 +662,13 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
       
       nextTrace.clear()
-      if (successful)
-        exploredTacker.trimExplored(lastMaxIndex)
+      if (successful) {
+        val dif = currentTrace.zip(prevTrace).takeWhile(Function.tupled(_ == _)).size
+        println("Prev trace:    " + printPath2(prevTrace))
+        println("Intersect:     " + dif + " " + currentTrace.size)
+        exploredTacker.trimExplored(dif + 1)
+      }
+        
       
       dpor(currentTrace) match {
         case Some(trace) =>
