@@ -186,10 +186,10 @@ object Util {
       v.headOption match {
         case Some(even) if f(even) =>
           return Some(even, result ++ v.tail)
-        case Some(other) => helper(v.tail, result :+ other)
+        case Some(other) =>
+          return helper(v.tail, result :+ other)
         case None => return None
       }
-      return None
     }
   
     for ((key, value) <- map) helper(value) match {
@@ -203,8 +203,7 @@ object Util {
   }
   
   def dequeueOne(
-          outer: HashMap[String, Queue[(Unique, ActorCell, Envelope)]],
-          set: scala.collection.immutable.Set[Unique]
+          outer: HashMap[String, Queue[(Unique, ActorCell, Envelope)]]
         ) : Option[(Unique, ActorCell, Envelope)] = { 
     
     outer.headOption match {
@@ -213,7 +212,7 @@ object Util {
           if (queue.isEmpty == true) {
             
             outer.remove(receiver) match {
-              case Some(key) => dequeueOne(outer, set)
+              case Some(key) => dequeueOne(outer)
               case None => throw new Exception("internal error")
             }
 

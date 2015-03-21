@@ -79,6 +79,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
   var currentTrace = new Queue[Unique]
   val nextTrace = new Queue[Unique]
   
+  var lastMaxIndex = 0
+  var successful = true
+  
   var parentEvent = getRootRootEvent()
   var scheduledEvent : Unique = null
   
@@ -97,11 +100,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
   
   def printQueues() = {
         println(printPath2(nextTrace))
-        println("size: " + pendingEvents.size)
-        for((_, queue) <- pendingEvents) {
-          for ((u, _, _) <- queue)
-            println("> " + u.id)
-        } 
+        //println("size: " + pendingEvents.size)
+        //for((_, queue) <- pendingEvents) {
+        //  for ((u, _, _) <- queue)
+        //    println("> " + u.id)
+        //} 
   }
   
   
@@ -267,10 +270,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
     // Get from the current set of pending events.
     def getPendingEvent(): Option[(Unique, ActorCell, Envelope)] = {
       
-      val f = isNotInSet(nextTrace.drop(1).toSet, _: (Unique, ActorCell, Envelope))
       // Do we have some pending events
-      //Util.dequeueOne(pendingEvents.clone(), nextTrace.drop(1).toSet) match {
-      Util.dequeueOneIf(pendingEvents, f) match {
+      val parFun = isNotInSet(
+          nextTrace.drop(1).toSet, 
+          _: (Unique, ActorCell, Envelope))
+      Util.dequeueOneIf(pendingEvents, parFun) match {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
               + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
@@ -286,7 +290,18 @@ class DPORwFailures extends Scheduler with LazyLogging {
               id + Console.RESET)
           Some(qui)
 
-        case None => None        
+        case None => Util.dequeueOne(pendingEvents) match {
+          case Some( divEvent @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
+            logger.trace( Console.RED + "Divegent event: " 
+                + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
+            //Some(divEvent)
+            currentTrace = prevTrace
+            successful = false
+            None
+          case None =>
+            successful = true
+            None
+        }
         case _ => throw new Exception("internal error")
       }
     }
@@ -647,12 +662,14 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
       
       nextTrace.clear()
+      if (successful)
+        exploredTacker.trimExplored(lastMaxIndex)
       
       dpor(currentTrace) match {
         case Some(trace) =>
           nextTrace ++= trace
           
-          logger.debug(Console.BLUE + "Next trace:  " + 
+          logger.debug(Console.BLUE + "Next trace:    " + 
               Util.traceStr(nextTrace) + Console.RESET)
           exploredTacker.aboutToPlay(trace)
           
@@ -779,33 +796,39 @@ class DPORwFailures extends Scheduler with LazyLogging {
           // replayed. In other words, get the last element of the
           // common prefix and figure out which index in the trace
           // it corresponds to.
-          val lastElement = commonPrefix.last
-          val branchI = trace.indexWhere { e => (e == lastElement.value) }
+          //val lastElement = commonPrefix.last
+          //val branchI = trace.indexWhere { e => (e == lastElement.value) }
 
+          val newLastElement = earlierPath(earlierPath.size - 2)
+          val newBranchI = trace.indexWhere { e => (e == newLastElement.value) }
+          
           val needToReplay = Queue() :+ laterN.value :+ earlierN.value
             //.drop(branchI + 1)
             //.dropRight(currentTrace.size - branchI - 1)
             //.filter { x => x.id != earlier.id }
           
           
-          val needToReplay2 = currentTrace.clone()
-            .drop(branchI + 1)
-            .dropRight(currentTrace.size - laterI - 1)
-            .filter { x => x.id != earlier.id }
+          //val needToReplay2 = currentTrace.clone()
+          //  .drop(branchI + 1)
+          //  .dropRight(currentTrace.size - laterI - 1)
+          // .filter { x => x.id != earlier.id }
           
-          //println("earlierPath  " + printPath(earlierPath))
-          //println("laterPath    " + printPath(laterPath))
-          //println("needToReplay " + printPath2(needToReplay))
+          println("earlierPath   " + printPath(earlierPath))
+          println("laterPath     " + printPath(laterPath))
+          println("needToReplay  " + printPath2(needToReplay))
           
-          require(branchI < laterI)
+          println("n branch elem " + newLastElement.value.id)
+
+          
+          require(newBranchI < laterI)
           
           // Since we're dealing with the vertices and not the
           // events, we need to extract the values.
           val needToReplayV = needToReplay.toList
 
-          exploredTacker.setExplored(branchI, (earlier, later))
+          exploredTacker.setExplored(newBranchI, (earlier, later))
           
-          return Some((branchI, needToReplayV))
+          return Some((newBranchI, needToReplayV))
 
       }
 
@@ -852,6 +875,42 @@ class DPORwFailures extends Scheduler with LazyLogging {
         return coEnabeled
     }
     
+    
+    def getNext() : Option[(Int, (Unique, Unique), Seq[Unique])] = {
+      
+      // If the backtrack set is empty, this means we're done.
+      if (backTrack.isEmpty) {
+        logger.info("Tutto finito!")
+        done(this)
+        return None
+        //System.exit(0);
+      }
+  
+      // Find the deepest backtrack value, and make sure
+      // its index is removed from the freeze set.
+      val maxIndex = backTrack.keySet.max
+      
+      val (_ @ Unique(_, id1),
+           _ @ Unique(_, id2)) = backTrack(maxIndex).headOption match {
+        case Some(((u1, u2), eventList)) => (u1, u2)
+        case None => 
+          backTrack.remove(maxIndex)
+          return getNext()
+        case _ => throw new Exception("invalid interleaving event types")
+      }
+      
+      val ((e1, e2), replayThis) = backTrack(maxIndex).head
+      backTrack(maxIndex).remove((e1, e2))
+      if (maxIndex == 10) {
+        progress1 += ((e1, e2))
+      }
+      
+      exploredTacker.isExplored((e1, e2), trace.take(maxIndex + 1) ++ replayThis) match {
+        case true => return getNext()
+        case false => return Some((maxIndex, (e1, e2), replayThis))
+      }
+
+    }
 
     /*
      * For every event in the trace (called later),
@@ -898,42 +957,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
         
       }
     }
-    
-    def getNext() : Option[(Int, (Unique, Unique), Seq[Unique])] = {
-      
-      // If the backtrack set is empty, this means we're done.
-      if (backTrack.isEmpty) {
-        logger.info("Tutto finito!")
-        done(this)
-        return None
-        //System.exit(0);
-      }
-  
-      // Find the deepest backtrack value, and make sure
-      // its index is removed from the freeze set.
-      val maxIndex = backTrack.keySet.max
-      
-      val (_ @ Unique(_, id1),
-           _ @ Unique(_, id2)) = backTrack(maxIndex).headOption match {
-        case Some(((u1, u2), eventList)) => (u1, u2)
-        case None => 
-          backTrack.remove(maxIndex)
-          return getNext()
-        case _ => throw new Exception("invalid interleaving event types")
-      }
-      
-      val ((e1, e2), replayThis) = backTrack(maxIndex).head
-      backTrack(maxIndex).remove((e1, e2))
-      if (maxIndex == 10) {
-        progress1 += ((e1, e2))
-      }
-      
-      exploredTacker.isExplored((e1, e2), trace.take(maxIndex + 1) ++ replayThis) match {
-        case true => return getNext()
-        case false => return Some((maxIndex, (e1, e2), replayThis))
-      }
-
-    }
 
     getNext() match {
       case Some((maxIndex, (e1, e2), replayThis)) =>        
@@ -944,11 +967,13 @@ class DPORwFailures extends Scheduler with LazyLogging {
         logger.info(Console.RED + e2 + Console.RESET)
            
         exploredTacker.setExplored(maxIndex, (e1, e2))
-        exploredTacker.trimExplored(maxIndex)
+        lastMaxIndex = maxIndex
         exploredTacker.printExplored()
         
         if (progress1.size != 0)
-        println("Progress: " + progress1.size  + " / " + progress2.size + " == " + (progress1.size : Float) / progress2.size * 100  )
+          println("Progress: " + progress1.size  + " / " + progress2.size + " == " + (progress1.size : Float) / progress2.size * 100  )
+        else
+          println("Progress: 0")
         
         // A variable used to figure out if the replay diverged.
         invariant = Queue(e1, e2)
