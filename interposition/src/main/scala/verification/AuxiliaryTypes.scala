@@ -160,6 +160,43 @@ class ExploredTacker {
   var exploredStack = new HashMap[Int, HashSet[(Unique, Unique)] ]
   val exploredSeq = new HashSet[Vector[Int]]
   
+  private[this] var currentTrace = new Queue[Unique]
+  private[this] var prevTrace = new Queue[Unique]
+  private[this] val nextTrace = new Queue[Unique]
+  
+  
+  // When executing a trace, find the next trace event.
+  def mutableTraceIterator( trace: Queue[Unique]) : Option[Unique] =
+  trace.isEmpty match {
+    case true => return None
+    case _ =>
+      val ret = trace.head
+      return Some(ret)
+  }
+  
+  // Get next message event from the trace.
+  def getNextTraceMessage() : Option[Unique] = 
+  mutableTraceIterator(nextTrace) match {
+    // All spawn events are ignored.
+    case some @ Some(Unique(s: SpawnEvent, id)) =>
+      nextTrace.dequeue()
+      getNextTraceMessage()
+    // All system messages need to ignored.
+    case some @ Some(Unique(t, 0)) => 
+      nextTrace.dequeue()
+      getNextTraceMessage()
+    case some @ Some(Unique(t, id)) => 
+      return some
+    case None => return None
+    case _ => throw new Exception("internal error")
+  }
+  
+  
+  def addEvent(u: Unique) = {
+    currentTrace += u
+  }
+  
+  
   def setExplored(index: Int, pair: (Unique, Unique)) =
   exploredStack.get(index) match {
     case Some(set) => set += pair
@@ -168,28 +205,58 @@ class ExploredTacker {
       exploredStack(index) = newElem
   }
   
+  
   def isExplored(pair: (Unique, Unique), seq: Queue[Unique]): Boolean = {
 
     for ((index, set) <- exploredStack) set.contains(pair) match {
       case true => return true
       case false =>
     }
+
+    //val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
+    //(exploredSeq contains nextTrace) match {
+    //  case true => true
+    //  case false => exploredSeq += nextTrace
+    //}
     
     return false
   }
   
   
   def aboutToPlay(seq: Queue[Unique]) {
-
     val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
-    //println("\tNEXT TRACE " + nextTrace)
     assert(!(exploredSeq contains nextTrace))
     exploredSeq += nextTrace
   }
   
   
+  def dequeueNextTraceMessage() {
+    nextTrace.dequeue()
+  }
+  
+  
+  def setNextTrace(trace: Queue[Unique]) = {
+    nextTrace ++= trace
+    prevTrace = currentTrace
+    currentTrace = new Queue[Unique]
+  }
+  
+  def getNextTrace() : Queue[Unique] = {
+    return nextTrace
+  }
+  
+  def getCurrentTrace() : Queue[Unique] = {
+    return currentTrace
+  }
+  
+  def startNewTrace() = {
+    def size = currentTrace.zip(prevTrace).takeWhile(Function.tupled(_ == _)).size
+    trimExplored(size)
+    nextTrace.clear()
+  }
+  
   def trimExplored(index: Int) = {
-    exploredStack = exploredStack.filter { other => other._1 <= index }
+    exploredStack = exploredStack.filterNot { other => other._1 > index }
   }
  
   
