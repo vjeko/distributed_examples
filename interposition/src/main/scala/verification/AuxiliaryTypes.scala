@@ -157,13 +157,43 @@ class TellEnqueueSemaphore extends Semaphore(1) with TellEnqueue {
 
 
 class ExploredTacker {
-  var exploredStack = new HashMap[Int, HashSet[(Unique, Unique)] ]
+  var exploredStack = new HashMap[Int, (HashSet[(Unique, Unique)], HashSet[Int]) ]
   val exploredSeq = new HashSet[Vector[Int]]
   
   private[this] var currentTrace = new Queue[Unique]
   private[this] var prevTrace = new Queue[Unique]
   private[this] val nextTrace = new Queue[Unique]
   
+  def canBeScheduled : (((Unique, ActorCell, Envelope)) => Boolean) = {
+    
+    def isNotInSet(
+        set : scala.collection.immutable.Set[Unique],
+        t : (Unique, ActorCell, Envelope)) : Boolean = {
+      return !(set.map { x => x.id } contains t._1.id)
+    }
+    
+    def can(
+        set : scala.collection.immutable.Set[Unique],
+        t : (Unique, ActorCell, Envelope)) : Boolean = {
+      
+      var ret = isNotInSet(set, t)
+      exploredStack.get(currentTrace.size - 1) match {
+        case Some((set, branchSet)) =>
+          
+          val inExplored = branchSet.contains(t._1.id)
+          println("** inExplored "+ inExplored + " && " + ret + " for " + t._1.id + " at " + currentTrace.size)
+          ret = ret && !inExplored
+        case None =>
+      }
+      
+      return ret
+    }
+    
+    return can(getNextTrace.drop(1).toSet, 
+               _: (Unique, ActorCell, Envelope))
+
+
+  }
   
   // When executing a trace, find the next trace event.
   def mutableTraceIterator( trace: Queue[Unique]) : Option[Unique] =
@@ -192,23 +222,42 @@ class ExploredTacker {
   }
   
   
-  def addEvent(u: Unique) = {
-    currentTrace += u
+  def addEvent(event: Unique) = {
+    currentTrace += event
+    /*
+    val branchID = event.id
+    val index = currentTrace.size - 2
+    
+    println("Freezing " + branchID + " at branch index " + index)
+    
+    if (currentTrace.size > 1) {
+      exploredStack.get(index) match {
+        case Some((set, branchSet)) => 
+          branchSet += branchID
+        case None => 
+          val tup @ (set, branchSet) = 
+            (new HashSet[(Unique, Unique)], new HashSet[Int])
+          branchSet += branchID
+          exploredStack(index) = tup
+      }
+    }
+    
+    */
   }
   
   
   def setExplored(index: Int, pair: (Unique, Unique)) =
   exploredStack.get(index) match {
-    case Some(set) => set += pair
+    case Some((set, branches)) => set += pair
     case None =>
       val newElem = new HashSet[(Unique, Unique)] + pair
-      exploredStack(index) = newElem
+      exploredStack(index) = (newElem, new HashSet[Int])
   }
   
   
   def isExplored(pair: (Unique, Unique), seq: Queue[Unique]): Boolean = {
 
-    for ((index, set) <- exploredStack) set.contains(pair) match {
+    for ((index, (set, branches)) <- exploredStack) set.contains(pair) match {
       case true => return true
       case false =>
     }
@@ -242,26 +291,53 @@ class ExploredTacker {
   }
   
   def getNextTrace() : Queue[Unique] = {
-    return nextTrace
+    return nextTrace.clone()
   }
   
   def getCurrentTrace() : Queue[Unique] = {
-    return currentTrace
+    return currentTrace.clone()
   }
   
   def startNewTrace() = {
     def size = currentTrace.zip(prevTrace).takeWhile(Function.tupled(_ == _)).size
-    trimExplored(size)
+    if (prevTrace.size != 0 && prevTrace != currentTrace)
+      trimExplored(size - 1)
     nextTrace.clear()
   }
   
+  def rollback() {
+    currentTrace = prevTrace.clone()
+  }
+  
   def trimExplored(index: Int) = {
-    exploredStack = exploredStack.filterNot { other => other._1 > index }
+    val cutIndex = index
+    val valIndex = index + 1
+    val branchID = List(prevTrace(valIndex).id)
+    exploredStack.get(cutIndex) match {
+      case Some((set, branchSet)) =>
+        println("Freezing -- previously " + branchSet)
+        branchSet ++= branchID
+      case None => 
+        println("Freezing -- previously nothing")
+
+        val tup @ (set, branchSet) = 
+          (new HashSet[(Unique, Unique)], new HashSet[Int])
+        branchSet ++= branchID
+        exploredStack(cutIndex) = tup  
+    }
+    
+    println("Freezing " + branchID + " at branch index " + cutIndex + " with valIndex == " + valIndex + " and cutIndex == " + cutIndex )
+
+    exploredStack = exploredStack.filterNot { other => other._1 > cutIndex }
+    if (exploredStack.size > 0) {
+      assert(cutIndex == exploredStack.map(x => x._1).max)
+      println("Trimming at branch index " + cutIndex + " with id " + exploredStack(cutIndex)._2)
+    }
   }
  
   
   def printExplored() = {
-    for ((index, set) <- exploredStack.toList.sortBy(t => (t._1))) {
+    for ((index, (set, branches)) <- exploredStack.toList.sortBy(t => (t._1))) {
       println(index + ": " + set.size)
       //val content = set.map(x => (x._1.id, x._2.id))
       //println(index + ": " + set.size + ": " +  content))

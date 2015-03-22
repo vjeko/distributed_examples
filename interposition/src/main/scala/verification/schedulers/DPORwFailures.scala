@@ -232,13 +232,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
     
     // Get from the current set of pending events.
     def getPendingEvent(): Option[(Unique, ActorCell, Envelope)] = {
-      
-      // Do we have some pending events
-      val parFun = isNotInSet(
-          exploredTacker.getNextTrace.drop(1).toSet, 
-          _: (Unique, ActorCell, Envelope))
-          
-      Util.dequeueOneIf(pendingEvents, parFun) match {
+
+      Util.dequeueOneIf(pendingEvents, exploredTacker.canBeScheduled) match {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
               + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
@@ -254,18 +249,18 @@ class DPORwFailures extends Scheduler with LazyLogging {
               id + Console.RESET)
           Some(qui)
 
-        case None => Util.dequeueOne(pendingEvents) match {
+        case None => 
+          Util.dequeueOne(pendingEvents) match {
           case Some( divEvent @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
             logger.trace( Console.RED + "Divegent event: " 
                 + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
-            //currentTrace = prevTrace
+            exploredTacker.rollback()
             None
           case None =>
             if (!invariant.isEmpty && awaitingQuiescence == false) {
               //println("***************** PROBLEM")
               //currentTrace = prevTrace
             }
-              
             None
         }
         case _ => throw new Exception("internal error")
@@ -629,6 +624,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
 
       exploredTacker.startNewTrace()
+      pendingEvents.clear()
       
       dpor(exploredTacker.getCurrentTrace) match {
         case Some(trace) =>
