@@ -203,6 +203,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       case _ => false
     }
     
+    
     def getDivergentPending(): Option[(Unique, ActorCell, Envelope)] = {
 
       Util.dequeueOneIf(pendingEvents, tracker.filter.convergent) match {
@@ -210,18 +211,19 @@ class DPORwFailures extends Scheduler with LazyLogging {
           logger.trace( Console.RED + 
               "Unable to play any of the pending events."
               + Console.RESET )
-          return Some(e)
+          Some(e)
         case None => Util.dequeueOne(pendingEvents) match {
           case Some(e) =>
             logger.trace( Console.RED + 
                 "Reached a dead end. Rolling back to the previous trace." 
                 + Console.RESET )
             tracker.rollback()
-            return None
+            None
           case None => return None
         }
       }
     }
+    
     
     // Get from the current set of pending events.
     def getConvergentPending(): Option[(Unique, ActorCell, Envelope)] = {
@@ -230,17 +232,17 @@ class DPORwFailures extends Scheduler with LazyLogging {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
               + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
-          return Some(next)
+          Some(next)
           
         case Some(par @ (Unique(NetworkPartition(part1, part2), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing the high level partition event " +
               id + Console.RESET)
-          return Some(par)
+          Some(par)
 
         case Some(qui @ (Unique(q: WaitQuiescence, id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing the high level quiescence event " +
               id + Console.RESET)
-          return Some(qui)
+          Some(qui)
 
         case None => getDivergentPending()
         case _ => throw new Exception("internal error")
@@ -275,7 +277,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
           
         // The trace says there is nothing to run so we have either exhausted our
         // trace or are running for the first time. Use any enabled transitions.
-        case None => return None
+        case None => None
         case _ => throw new Exception("internal error")
       }
     }
