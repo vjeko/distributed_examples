@@ -53,38 +53,31 @@ class DPORwFailures extends Scheduler with LazyLogging {
   var instrumenter = Instrumenter
   var externalEventList : Seq[ExternalEvent] = Vector()
   var externalEventIdx = 0
-  var started = false
   
-  var currentTime = 0
-  var interleavingCounter = 0
-
-  var invariantChecker : InvariantChecker = new NullInvariantChecker()
-  
-  val pendingEvents = new HashMap[String, Queue[(Unique, ActorCell, Envelope)]]  
-  val actorNames = new HashSet[String]
- 
-  val depGraph = Graph[Unique, DiEdge]()
-
   val quiescentPeriod = new HashMap[Unique, Int]
-  
-  val backTrack = new HashMap[Int, HashMap[(Unique, Unique), List[Unique]] ]
-  val backTrackSet = new HashMap[Int, HashSet[(Unique, Unique)] ]
-
-  var invariant : Queue[Unique] = Queue()
-  var tracker = new tracker
-  
-  var parentEvent = getRootRootEvent()
-  var scheduledEvent : Unique = null
-  
-  val reachabilityMap = new HashMap[String, Set[String]]
-  
-  var post: (Queue[Unique]) => Unit = nullFunPost
-  var done: (Scheduler) => Unit = nullFunDone
-  
   var currentQuiescentPeriod = 0
   var awaitingQuiescence = false
   var nextQuiescentPeriod = 0
   var quiescentMarker:Unique = null
+  
+  var currentTime = 0
+  var interleavingCounter = 0
+
+  
+  val depGraph = Graph[Unique, DiEdge]()
+  var parentEvent = getRootRootEvent()
+  
+  val pendingEvents = new HashMap[String, Queue[(Unique, ActorCell, Envelope)]]  
+  val actorNames = new HashSet[String]
+
+  val backTrack = new HashMap[Int, HashMap[(Unique, Unique), List[Unique]] ]
+  val tracker = new ExploredTacker
+  
+  var invariantChecker : InvariantChecker = new NullInvariantChecker()
+  var invariant : Queue[Unique] = Queue()
+  
+  var post: (Queue[Unique]) => Unit = nullFunPost
+  var done: (Scheduler) => Unit = nullFunDone
 
   def nullFunPost(trace: Queue[Unique]) : Unit = {}
   def nullFunDone(s :Scheduler) : Unit = {}
@@ -167,7 +160,6 @@ class DPORwFailures extends Scheduler with LazyLogging {
     invariantChecker.init(ActorRegistry.actors)
     invariantChecker.newRun()
     
-    started = false
     actorNames.clear
     ActorRegistry.actors.clear()
     externalEventIdx = 0
@@ -210,16 +202,29 @@ class DPORwFailures extends Scheduler with LazyLogging {
       case (Unique(_, id1), Unique(_, id2) ) => id1 == id2  
       case _ => false
     }
+    
+    def getDivergentPending(): Option[(Unique, ActorCell, Envelope)] = {
 
-
-    def isNotInSet(
-        set : scala.collection.immutable.Set[Unique],
-        t : (Unique, ActorCell, Envelope)) : Boolean = {
-      return !(set.map { x => x.id } contains t._1.id)
+      Util.dequeueOneIf(pendingEvents, tracker.filter.convergent) match {
+        case Some(e) =>
+          logger.trace( Console.RED + 
+              "Unable to play any of the pending events."
+              + Console.RESET )
+          return Some(e)
+        case None => Util.dequeueOne(pendingEvents) match {
+          case Some(e) =>
+            logger.trace( Console.RED + 
+                "Reached a dead end. Rolling back to the previous trace." 
+                + Console.RESET )
+            tracker.rollback()
+            return None
+          case None => return None
+        }
+      }
     }
     
     // Get from the current set of pending events.
-    def getPendingEvent(): Option[(Unique, ActorCell, Envelope)] = {
+    def getConvergentPending(): Option[(Unique, ActorCell, Envelope)] = {
 
       Util.dequeueOneIf(pendingEvents, tracker.filter.convergent) match {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
@@ -237,22 +242,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
               id + Console.RESET)
           return Some(qui)
 
-        case None => Util.dequeueOneIf(pendingEvents, tracker.filter.convergent) match {
-            case Some(e) =>
-              logger.trace( Console.RED + 
-                  "Unable to play any of the pending events."
-                  + Console.RESET )
-              Some(e)
-            case None => Util.dequeueOne(pendingEvents) match {
-              case Some(e) =>
-                logger.trace( Console.RED + 
-                    "Reached a dead end. Rolling back to the previous trace." 
-                    + Console.RESET )
-                tracker.rollback()
-                return None
-              case None => return None
-            }
-          }         
+        case None => getDivergentPending()
         case _ => throw new Exception("internal error")
       }
     }
@@ -285,7 +275,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
           
         // The trace says there is nothing to run so we have either exhausted our
         // trace or are running for the first time. Use any enabled transitions.
-        case None => None
+        case None => return None
         case _ => throw new Exception("internal error")
       }
     }
@@ -325,7 +315,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
             Some((u, null, null))
             
           // We call this a divergent state.
-          case None => getPendingEvent()
+          case None => getConvergentPending()
           
           // Something went wrong.
           case _ => throw new Exception("not a message")
@@ -337,7 +327,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
          *  time through, there should be no pending messages, signifying quiescence. Get pending event takes
          *  care of the first run. We could explicitly detect divergence here, but we haven't been so far.
          */
-        getPendingEvent()
+        getConvergentPending()
     }
     
     
@@ -867,10 +857,8 @@ class DPORwFailures extends Scheduler with LazyLogging {
               // safely mark the interleaving of (earlier, later) as
               // already explored.
               backTrack.getOrElseUpdate(branchI, new HashMap[(Unique, Unique), List[Unique]])
-              backTrackSet.getOrElseUpdate(branchI, new HashSet[(Unique, Unique)])
-              
-              backTrackSet(branchI) += ((later, earlier))
               backTrack(branchI)((later, earlier)) = needToReplayV
+              
               // XXX: Progress hook.
             case None => // Nothing
           }
