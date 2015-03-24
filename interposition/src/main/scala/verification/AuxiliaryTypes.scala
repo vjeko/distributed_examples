@@ -164,6 +164,35 @@ class ExploredTacker {
   private[this] var prevTrace = new Queue[Unique]
   private[this] val nextTrace = new Queue[Unique]
   
+
+  object filter {
+    
+    def inUpcomingEvents(
+        set : scala.collection.immutable.Set[Unique],
+        t : (Unique, ActorCell, Envelope)) : Boolean =
+      return !(set.map { x => x.id } contains t._1.id) &&
+             !alreadyExplored(t)
+    
+    
+    def alreadyExplored(t : (Unique, ActorCell, Envelope)) : Boolean = {
+      exploredStack.get(currentTrace.size - 1) match {
+        case Some((set, branchSet)) =>
+          return branchSet.contains(t._1.id)
+        case None =>
+          return false
+      }
+    }
+    
+    
+    def convergent : (((Unique, ActorCell, Envelope)) => Boolean) = 
+      return inUpcomingEvents(getNextTrace.drop(1).toSet, 
+                              _: (Unique, ActorCell, Envelope))
+                              
+    def divergent : (((Unique, ActorCell, Envelope)) => Boolean) = 
+      return !alreadyExplored(_: (Unique, ActorCell, Envelope))
+
+  }
+
   
   def canBeScheduled : (((Unique, ActorCell, Envelope)) => Boolean) = {
     
@@ -298,6 +327,8 @@ class ExploredTacker {
     val cutIndex = index - 1
     val valIndex = index
     val branchID = List(prevTrace(valIndex).id)
+    
+    println("Trimming at cutIndex " + cutIndex + " valIndex " + valIndex + " branchID " + branchID)
     
     exploredStack.get(cutIndex) match {
       case Some((set, branchSet)) =>

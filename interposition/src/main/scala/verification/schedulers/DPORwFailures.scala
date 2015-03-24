@@ -71,7 +71,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
   val backTrackSet = new HashMap[Int, HashSet[(Unique, Unique)] ]
 
   var invariant : Queue[Unique] = Queue()
-  var exploredTacker = new ExploredTacker
+  var tracker = new tracker
   
   var parentEvent = getRootRootEvent()
   var scheduledEvent : Unique = null
@@ -172,7 +172,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
     ActorRegistry.actors.clear()
     externalEventIdx = 0
     
-    exploredTacker.addEvent( getRootRootEvent() )
+    tracker.addEvent( getRootRootEvent() )
     runExternal()
   }
   
@@ -221,40 +221,45 @@ class DPORwFailures extends Scheduler with LazyLogging {
     // Get from the current set of pending events.
     def getPendingEvent(): Option[(Unique, ActorCell, Envelope)] = {
 
-      Util.dequeueOneIf(pendingEvents, exploredTacker.canBeScheduled) match {
+      Util.dequeueOneIf(pendingEvents, tracker.filter.convergent) match {
         case Some( next @ (u @ Unique(MsgEvent(snd, rcv, msg), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing pending: " 
               + "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
-          Some(next)
+          return Some(next)
           
         case Some(par @ (Unique(NetworkPartition(part1, part2), id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing the high level partition event " +
               id + Console.RESET)
-          Some(par)
+          return Some(par)
 
         case Some(qui @ (Unique(q: WaitQuiescence, id), _, _)) =>
           logger.trace( Console.GREEN + "Now playing the high level quiescence event " +
               id + Console.RESET)
-          Some(qui)
+          return Some(qui)
 
-        case None => 
-          Util.dequeueOne(pendingEvents) match {
-          case Some(_) =>
-            logger.trace( Console.RED + 
-                "Unable to play any of the pending events. " + 
-                "Rolling back to the previous trace." 
-                + Console.RESET )
-            exploredTacker.rollback()
-            None
-          case None => None
-        }
+        case None => Util.dequeueOneIf(pendingEvents, tracker.filter.convergent) match {
+            case Some(e) =>
+              logger.trace( Console.RED + 
+                  "Unable to play any of the pending events."
+                  + Console.RESET )
+              Some(e)
+            case None => Util.dequeueOne(pendingEvents) match {
+              case Some(e) =>
+                logger.trace( Console.RED + 
+                    "Reached a dead end. Rolling back to the previous trace." 
+                    + Console.RESET )
+                tracker.rollback()
+                return None
+              case None => return None
+            }
+          }         
         case _ => throw new Exception("internal error")
       }
     }
     
     
     def getMatchingMessage() : Option[(Unique, ActorCell, Envelope)] = {
-      exploredTacker.getNextTraceMessage() match {
+      tracker.getNextTraceMessage() match {
         // The trace says there is a message event to run.
         case Some(u @ Unique(MsgEvent(snd, rcv, msg), id)) =>
 
@@ -304,19 +309,19 @@ class DPORwFailures extends Scheduler with LazyLogging {
           case m @ Some((u @ Unique(MsgEvent(snd, rcv, msg), id), cell, env)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Message: " +
                 "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
-            exploredTacker.dequeueNextTraceMessage()
+            tracker.dequeueNextTraceMessage()
             Some((u, cell, env))
             
           case Some((u @ Unique(NetworkPartition(part1, part2), id), _, _)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Partition: (" 
                 + part1 + " <-> " + part2 + ")" + Console.RESET )
-            exploredTacker.dequeueNextTraceMessage()
+            tracker.dequeueNextTraceMessage()
             Some((u, null, null))
 
           case Some((u @ Unique(WaitQuiescence(), id), _, _)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Quiescence: (" 
                 + id +  ")" + Console.RESET )
-            exploredTacker.dequeueNextTraceMessage()
+            tracker.dequeueNextTraceMessage()
             Some((u, null, null))
             
           // We call this a divergent state.
@@ -343,7 +348,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       
       case Some((nextEvent @ Unique(MsgEvent(snd, rcv, msg), nID), cell, env)) =>
       
-        exploredTacker.addEvent( nextEvent )
+        tracker.addEvent( nextEvent )
         (depGraph get nextEvent)
         
         parentEvent = nextEvent
@@ -363,7 +368,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
           
         instrumenter().tellEnqueue.await()
         
-        exploredTacker.addEvent( nextEvent )
+        tracker.addEvent( nextEvent )
         return schedule_new_message()
 
       case Some((nextEvent @ Unique(q @ WaitQuiescence(), nID), _, _)) =>
@@ -589,7 +594,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       nextQuiescentPeriod = 0
       
       parentEvent = quiescentMarker
-      exploredTacker.addEvent( quiescentMarker )
+      tracker.addEvent( quiescentMarker )
       
       quiescentMarker = null
 
@@ -602,19 +607,19 @@ class DPORwFailures extends Scheduler with LazyLogging {
       
                   
       logger.debug(Console.BLUE + "Current trace: " +
-          Util.traceStr(exploredTacker.getCurrentTrace) + Console.RESET)
+          Util.traceStr(tracker.getCurrentTrace) + Console.RESET)
 
 
-      exploredTacker.startNewTrace()
+      tracker.startNewTrace()
       pendingEvents.clear()
       
-      dpor(exploredTacker.getCurrentTrace) match {
+      dpor(tracker.getCurrentTrace) match {
         case Some(trace) =>
-          exploredTacker.setNextTrace(trace)
+          tracker.setNextTrace(trace)
           logger.debug(Console.BLUE + "Next trace:    " + 
-              Util.traceStr(exploredTacker.getNextTrace) + Console.RESET)
+              Util.traceStr(tracker.getNextTrace) + Console.RESET)
               
-          exploredTacker.aboutToPlay(trace)
+          tracker.aboutToPlay(trace)
           
           parentEvent = getRootRootEvent()
           currentQuiescentPeriod = 0
@@ -673,7 +678,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       val later = getEvent(laterI, trace)
 
       // See if this interleaving has been explored.
-      //val explored = exploredTacker.isExplored((later, earlier))
+      //val explored = tracker.isExplored((later, earlier))
       //if (explored) return None
 
       (earlier.event, later.event) match {
@@ -686,7 +691,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
           val branchI = earlierI
           val needToReplay = List(later, earlier)
             
-          exploredTacker.setExplored(branchI, (earlier, later))
+          tracker.setExplored(branchI, (earlier, later))
 
           return Some((branchI, needToReplay))
           
@@ -695,12 +700,12 @@ class DPORwFailures extends Scheduler with LazyLogging {
         // will become disabled in this case.
         case (_: NetworkPartition, _: MsgEvent) => 
           val branchI = earlierI - 1
-          val needToReplay = exploredTacker.getCurrentTrace.clone()
+          val needToReplay = tracker.getCurrentTrace.clone()
             .drop(earlierI + 1)
             .take(laterI - earlierI)
             .toList :+ earlier
           
-          exploredTacker.setExplored(branchI, (earlier, later))
+          tracker.setExplored(branchI, (earlier, later))
           
           return Some((branchI, needToReplay))
           
@@ -750,7 +755,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
           // events, we need to extract the values.
           val needToReplayV = needToReplay.toList
 
-          exploredTacker.setExplored(branchI, (earlier, later))
+          tracker.setExplored(branchI, (earlier, later))
           
           return Some((branchI, needToReplayV))
       }
@@ -824,7 +829,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
       backTrack(maxIndex).remove((e1, e2))
       // XXX: Progress hook.
       
-      exploredTacker.isExplored((e1, e2), trace.take(maxIndex + 1) ++ replayThis) match {
+      tracker.isExplored((e1, e2), trace.take(maxIndex + 1) ++ replayThis) match {
         case true => return getNext()
         case false => return Some((maxIndex, (e1, e2), replayThis))
       }
@@ -880,11 +885,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
         logger.info(Console.RED + "Exploring a new message interleaving " + 
            e1.id + " and " + e2.id  + " at index " + maxIndex + Console.RESET)
-        logger.info(Console.RED + e1 + Console.RESET)
-        logger.info(Console.RED + e2 + Console.RESET)
+        //logger.info(Console.RED + e1 + Console.RESET)
+        //logger.info(Console.RED + e2 + Console.RESET)
            
-        exploredTacker.setExplored(maxIndex, (e1, e2))
-        exploredTacker.printExplored()
+        tracker.setExplored(maxIndex, (e1, e2))
+        tracker.printExplored()
         
         // A variable used to figure out if the replay diverged.
         invariant = Queue(e1, e2)
