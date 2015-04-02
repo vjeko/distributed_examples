@@ -177,7 +177,8 @@ class ExploredTacker {
     def alreadyExplored(t : (Unique, ActorCell, Envelope)) : Boolean = {
       exploredStack.get(currentTrace.size - 1) match {
         case Some((set, branchSet)) =>
-          return branchSet.contains(t._1.id)
+          //return branchSet.contains(t._1.id)
+          return false
         case None =>
           return false
       }
@@ -277,7 +278,8 @@ class ExploredTacker {
   
   def aboutToPlay(seq: Queue[Unique]) {
     val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
-    assert(!(exploredSeq contains nextTrace))
+    if((exploredSeq contains nextTrace))
+      throw new Exception("PROBLEM")
     exploredSeq += nextTrace
   }
   

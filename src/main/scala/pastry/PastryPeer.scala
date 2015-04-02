@@ -23,7 +23,7 @@ import com.typesafe.scalalogging.Logger
 
 class PastryPeer extends Actor with Config with ActorObserver {
   
-  //val logger = Logger(LoggerFactory.getLogger("pastry"))
+  val logger = Logger(LoggerFactory.getLogger("pastry"))
   
   var myID : BigInt = 0
   var myIDStr = "NONE"
@@ -55,7 +55,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     
     val newPeer = msg.newPeer
     
-    //logger.trace(myIDStr + ": " + "I am responsible for key " + toBase(newPeer))
+    logger.trace(myIDStr + ": " + "I am responsible for key " + toBase(newPeer))
     getRef(newPeer) ! JoinReply(msg.visitedPeers :+ myID)
   }
   
@@ -65,7 +65,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     
     val newPeer = msg.newPeer
     
-    //logger.trace(myIDStr + ": " + toBase(nextPeer) + " is responsible for key " + toBase(newPeer))
+    logger.trace(myIDStr + ": " + toBase(nextPeer) + " is responsible for key " + toBase(newPeer))
     getRef(nextPeer) ! JoinRequest(msg.newPeer, msg.visitedPeers :+ myID)
   }
   
@@ -73,7 +73,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
   def handleJoinReply(sender : ActorRef, msg : JoinReply) = {
     assertions(msg)
     
-    //logger.trace(myIDStr + ": " + "Visited nodes: " + msg.visitedPeers)
+    logger.trace(myIDStr + ": " + "Visited nodes: " + msg.visitedPeers)
     
     for(peer <- msg.visitedPeers) {
       assert(peer != myID)
@@ -109,7 +109,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     assertions(msg)
     
     if(msg.visitedPeers contains myID) {
-      //logger.error(myIDStr + ": " + "Loop created! Aborting. Visited nodes: "  + msg.visitedPeers)
+      logger.error(myIDStr + ": " + "Loop created! Aborting. Visited nodes: "  + msg.visitedPeers)
       return
     }
     
@@ -193,7 +193,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     for((peerStr, peerInt) <- rt) {
       ackBarrier += peerInt
       originalAckBarrier += peerInt
-      //logger.trace(myIDStr + ": " + "Adding " + peerStr + " " + peerInt + " to " + ackBarrier)
+      logger.trace(myIDStr + ": " + "Adding " + peerStr + " " + peerInt + " to " + ackBarrier)
     }
     
     
@@ -201,7 +201,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
       ackBarrier += peer
       originalAckBarrier += peer
       
-      //logger.trace(myIDStr + ": " + "Adding " + peer + " to " + ackBarrier)
+      logger.trace(myIDStr + ": " + "Adding " + peer + " to " + ackBarrier)
     }
     
     
@@ -224,10 +224,10 @@ class PastryPeer extends Actor with Config with ActorObserver {
     state = State.Joining
     msg.booststrapPeer match {
       case value if value == myID =>
-        //logger.trace(myIDStr + ": " + "Starting a new swarm." )
+        logger.trace(myIDStr + ": " + "Starting a new swarm." )
         state = State.Online
       case _ =>      
-        //logger.trace(myIDStr + ": " + "Sending " + msg + " to " + toBase(msg.booststrapPeer) )
+        logger.trace(myIDStr + ": " + "Sending " + msg + " to " + toBase(msg.booststrapPeer) )
         getRef(msg.booststrapPeer) ! JoinRequest(myID, scala.collection.immutable.Queue())
       }
   }
@@ -238,7 +238,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     
     getNext(msg.key) match {
       case None =>
-        //logger.trace(myIDStr + ": " + "Wrote " + msg.key + " <- " + msg.value)
+        logger.trace(myIDStr + ": " + "Wrote " + msg.key + " <- " + msg.value)
         store(msg.key) = msg.value
       case Some(nextPeer) => getRef(nextPeer) ! msg
     }
@@ -251,7 +251,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
     getNext(msg.key) match {
       case None => 
         val value = store(msg.key)
-        //logger.trace(myIDStr + ": " + "Read " + msg.key + " == " + value)
+        logger.trace(myIDStr + ": " + "Read " + msg.key + " == " + value)
       case Some(nextPeer) => getRef(nextPeer) ! msg
     }
   }
@@ -271,7 +271,7 @@ class PastryPeer extends Actor with Config with ActorObserver {
         state = State.Online
         ackBarrier.clear()
         originalAckBarrier.clear()
-        //logger.trace(myIDStr + ": " + "Going online...")
+        logger.trace(myIDStr + ": " + "Going online...")
       }
     }
   }

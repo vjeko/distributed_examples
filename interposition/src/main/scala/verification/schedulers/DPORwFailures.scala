@@ -206,7 +206,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
     
     def getDivergentPending(): Option[(Unique, ActorCell, Envelope)] = {
 
-      Util.dequeueOneIf(pendingEvents, tracker.filter.convergent) match {
+      Util.dequeueOneIf(pendingEvents, tracker.filter.divergent) match {
         case Some(e) =>
           logger.trace( Console.RED + 
               "Unable to play any of the pending events."
@@ -217,8 +217,9 @@ class DPORwFailures extends Scheduler with LazyLogging {
             logger.trace( Console.RED + 
                 "Reached a dead end. Rolling back to the previous trace." 
                 + Console.RESET )
-            tracker.rollback()
-            None
+            //tracker.rollback()
+            Some(e)
+            //None
           case None => return None
         }
       }
@@ -611,7 +612,15 @@ class DPORwFailures extends Scheduler with LazyLogging {
           logger.debug(Console.BLUE + "Next trace:    " + 
               Util.traceStr(tracker.getNextTrace) + Console.RESET)
               
-          tracker.aboutToPlay(trace)
+              try {
+               tracker.aboutToPlay(trace) 
+              } catch {
+                case e : Exception => 
+                  done(this)
+                  println("SAME TRACE")
+                  System.exit(-4)
+              }
+          
           
           parentEvent = getRootRootEvent()
           currentQuiescentPeriod = 0
@@ -706,17 +715,18 @@ class DPORwFailures extends Scheduler with LazyLogging {
           // correspond to those events
           val earlierN = (depGraph get earlier)
           val laterN = (depGraph get later)
+          val rootN = (depGraph get getRootRootEvent)
           
           // Get the dependency path between later event and the
           // root event (root node) in the system.
-          val laterPath = laterN.pathTo(getRootEvent(laterN)) match {
+          val laterPath = laterN.pathTo(rootN) match {
             case Some(path) => path.nodes.toList.reverse
             case None => throw new Exception("no such path")
           }
 
           // Get the dependency path between earlier event and the
           // root event (root node) in the system.
-          val earlierPath = earlierN.pathTo(getRootEvent(earlierN)) match {
+          val earlierPath = earlierN.pathTo(rootN) match {
             case Some(path) => path.nodes.toList.reverse
             case None => throw new Exception("no such path")
           }
@@ -731,11 +741,23 @@ class DPORwFailures extends Scheduler with LazyLogging {
           
           //val commonPrefix = laterPath.intersect(earlierPath)
           //val lastElement = commonPrefix.last
-          val lastElement = earlierPath(earlierPath.size - 2)
-          val branchI = trace.indexWhere { e => (e == lastElement.value) }
+          //val lastElement = earlierPath(earlierPath.size - 2)
+          //val branchI = trace.indexWhere { e => (e == lastElement.value) }
+          val branchI = earlierI - 1
+          //val needToReplay = Queue() :+ laterN.value :+ earlierN.value
+
+          val prefix = trace.dropRight(trace.size - earlierI)
+          val prefixSet = prefix.toSet
+          val (l1, l2) = laterPath.partition { x => prefixSet contains x.value }
           
-          val needToReplay = Queue() :+ laterN.value :+ earlierN.value
           
+          val needToReplay = l2 :+ earlierN
+          
+
+          assert(l1 ++ l2 == laterPath)
+          
+          println(earlierN.value.id + " -- " + laterN.value.id  + " (" + printPath(l1) + "| " + printPath(l2) + ")")
+          //println(rep)
           //val needToReplay = currentTrace.clone()
           //  .drop(branchI + 1)
           //  .dropRight(currentTrace.size - laterI - 1)
@@ -745,11 +767,11 @@ class DPORwFailures extends Scheduler with LazyLogging {
           
           // Since we're dealing with the vertices and not the
           // events, we need to extract the values.
-          val needToReplayV = needToReplay.toList
+          val needToReplayV = needToReplay
 
           tracker.setExplored(branchI, (earlier, later))
           
-          return Some((branchI, needToReplayV))
+          return Some((branchI, needToReplay.map { x => x.value }))
       }
 
     }
