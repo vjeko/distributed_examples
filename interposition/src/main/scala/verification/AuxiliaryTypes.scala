@@ -163,7 +163,6 @@ class ExploredTacker {
   private[this] var currentTrace = new Queue[Unique]
   private[this] var prevTrace = new Queue[Unique]
   private[this] val nextTrace = new Queue[Unique]
-  
 
   object filter {
     
@@ -173,16 +172,18 @@ class ExploredTacker {
       return !(set.map { x => x.id } contains t._1.id) &&
              !alreadyExplored(t)
     
-    
-    def alreadyExplored(t : (Unique, ActorCell, Envelope)) : Boolean = {
+    def alreadyExploredImpl(id: Int) : Boolean = {
       exploredStack.get(currentTrace.size - 1) match {
         case Some((set, branchSet)) =>
-          //return branchSet.contains(t._1.id)
-          return false
+          return branchSet.contains(id)
         case None =>
           return false
       }
     }
+    
+    def alreadyExplored(t : (Unique, ActorCell, Envelope)) : Boolean =
+      alreadyExploredImpl(t._1.id)
+
     
     
     def convergent : (((Unique, ActorCell, Envelope)) => Boolean) = 
@@ -278,8 +279,7 @@ class ExploredTacker {
   
   def aboutToPlay(seq: Queue[Unique]) {
     val nextTrace : Vector[Int] = seq.map { x => x.id }.toVector
-    if((exploredSeq contains nextTrace))
-      throw new Exception("PROBLEM")
+    assert(!(exploredSeq contains nextTrace))
     exploredSeq += nextTrace
   }
   
@@ -349,6 +349,11 @@ class ExploredTacker {
     }
   }
   
+  
+
+  def progress() : Boolean = {
+    return currentTrace != prevTrace
+  }
 
   def clear() = {
     exploredStack.clear()

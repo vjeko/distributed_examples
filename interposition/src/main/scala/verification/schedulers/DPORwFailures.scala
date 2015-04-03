@@ -205,23 +205,14 @@ class DPORwFailures extends Scheduler with LazyLogging {
     
     
     def getDivergentPending(): Option[(Unique, ActorCell, Envelope)] = {
-
-      Util.dequeueOneIf(pendingEvents, tracker.filter.divergent) match {
+      Util.dequeueOne(pendingEvents) match {
         case Some(e) =>
           logger.trace( Console.RED + 
-              "Unable to play any of the pending events."
+              "Unable to flip the events. Rolling back to the previous trace." 
               + Console.RESET )
-          Some(e)
-        case None => Util.dequeueOne(pendingEvents) match {
-          case Some(e) =>
-            logger.trace( Console.RED + 
-                "Reached a dead end. Rolling back to the previous trace." 
-                + Console.RESET )
-            //tracker.rollback()
-            Some(e)
-            //None
-          case None => return None
-        }
+          tracker.rollback()
+          return None
+        case None => return None
       }
     }
     
@@ -245,40 +236,58 @@ class DPORwFailures extends Scheduler with LazyLogging {
               id + Console.RESET)
           Some(qui)
 
-        case None => getDivergentPending()
+        case None => 
+            //logger.trace( Console.RED + 
+            //    "Unable to reverse the events. Rolling back to the previous trace." 
+            //    + Console.RESET )
+            //tracker.rollback()
+            //None
+          getDivergentPending()
         case _ => throw new Exception("internal error")
       }
     }
     
     
     def getMatchingMessage() : Option[(Unique, ActorCell, Envelope)] = {
-      tracker.getNextTraceMessage() match {
+      val candidate = tracker.getNextTraceMessage()
+      
+      candidate match {
+        case Some(Unique(_, id)) if 
+          tracker.filter.alreadyExploredImpl(id) =>
+            //assert(false)
+            return None
+        case _ =>
+      }
+      
+      candidate match {
         // The trace says there is a message event to run.
         case Some(u @ Unique(MsgEvent(snd, rcv, msg), id)) =>
 
           // Look at the pending events to see if such message event exists.
           pendingEvents.get(rcv) match {
             case Some(queue) =>
-              queue.dequeueFirst(equivalentTo(u, _))
-            case None =>  None
+              return queue.dequeueFirst(equivalentTo(u, _))
+            case None =>  return None
           }
           
         case Some(u @ Unique(NetworkPartition(_, _), id)) =>
           // Look at the pending events to see if such message event exists. 
           pendingEvents.get(SCHEDULER) match {
-            case Some(queue) => queue.dequeueFirst(equivalentTo(u, _))
-            case None =>  None
+            case Some(queue) => 
+              return queue.dequeueFirst(equivalentTo(u, _))
+            case None =>  return None
           }
 
         case Some(u @ Unique(WaitQuiescence(), _)) => // Look at the pending events to see if such message event exists.
           pendingEvents.get(SCHEDULER) match {
-            case Some(queue) => queue.dequeueFirst(equivalentTo(u, _))
-            case None =>  None
+            case Some(queue) => 
+              return queue.dequeueFirst(equivalentTo(u, _))
+            case None =>  return None
           }
           
         // The trace says there is nothing to run so we have either exhausted our
         // trace or are running for the first time. Use any enabled transitions.
-        case None => None
+        case None => return None
         case _ => throw new Exception("internal error")
       }
     }
@@ -299,23 +308,23 @@ class DPORwFailures extends Scheduler with LazyLogging {
           
           // There is a pending event that matches a message in our trace.
           // We call this a convergent state.
-          case m @ Some((u @ Unique(MsgEvent(snd, rcv, msg), id), cell, env)) =>
+          case Some(tup @ (Unique(MsgEvent(snd, rcv, msg), id), cell, env)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Message: " +
                 "(" + snd + " -> " + rcv + ") " +  + id + Console.RESET )
             tracker.dequeueNextTraceMessage()
-            Some((u, cell, env))
+            Some(tup)
             
-          case Some((u @ Unique(NetworkPartition(part1, part2), id), _, _)) =>
+          case Some(tup @ (Unique(NetworkPartition(part1, part2), id), _, _)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Partition: (" 
                 + part1 + " <-> " + part2 + ")" + Console.RESET )
             tracker.dequeueNextTraceMessage()
-            Some((u, null, null))
+            Some(tup)
 
-          case Some((u @ Unique(WaitQuiescence(), id), _, _)) =>
+          case Some(tup @ (Unique(WaitQuiescence(), id), _, _)) =>
             logger.trace( Console.GREEN + "Replaying the exact message: Quiescence: (" 
                 + id +  ")" + Console.RESET )
             tracker.dequeueNextTraceMessage()
-            Some((u, null, null))
+            Some(tup)
             
           // We call this a divergent state.
           case None => getConvergentPending()
@@ -612,15 +621,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
           logger.debug(Console.BLUE + "Next trace:    " + 
               Util.traceStr(tracker.getNextTrace) + Console.RESET)
               
-              try {
-               tracker.aboutToPlay(trace) 
-              } catch {
-                case e : Exception => 
-                  done(this)
-                  println("SAME TRACE")
-                  System.exit(-4)
-              }
-          
+          tracker.aboutToPlay(trace)
           
           parentEvent = getRootRootEvent()
           currentQuiescentPeriod = 0
@@ -738,31 +739,18 @@ class DPORwFailures extends Scheduler with LazyLogging {
           // replayed. In other words, get the last element of the
           // common prefix and figure out which index in the trace
           // it corresponds to.
-          
-          //val commonPrefix = laterPath.intersect(earlierPath)
-          //val lastElement = commonPrefix.last
-          //val lastElement = earlierPath(earlierPath.size - 2)
-          //val branchI = trace.indexWhere { e => (e == lastElement.value) }
           val branchI = earlierI - 1
-          //val needToReplay = Queue() :+ laterN.value :+ earlierN.value
 
           val prefix = trace.dropRight(trace.size - earlierI)
           val prefixSet = prefix.toSet
           val (l1, l2) = laterPath.partition { x => prefixSet contains x.value }
           
-          
-          val needToReplay = l2 :+ earlierN
-          
+          //val needToReplay = (l2 :+ earlierN).map { x => x.value }
+          val needToReplay = (List() :+ laterN :+ earlierN).map { x => x.value }
 
           assert(l1 ++ l2 == laterPath)
           
           println(earlierN.value.id + " -- " + laterN.value.id  + " (" + printPath(l1) + "| " + printPath(l2) + ")")
-          //println(rep)
-          //val needToReplay = currentTrace.clone()
-          //  .drop(branchI + 1)
-          //  .dropRight(currentTrace.size - laterI - 1)
-          // .filter { x => x.id != earlier.id }
-          
           require(branchI < laterI)
           
           // Since we're dealing with the vertices and not the
@@ -771,7 +759,7 @@ class DPORwFailures extends Scheduler with LazyLogging {
 
           tracker.setExplored(branchI, (earlier, later))
           
-          return Some((branchI, needToReplay.map { x => x.value }))
+          return Some((branchI, needToReplay))
       }
 
     }
@@ -860,37 +848,44 @@ class DPORwFailures extends Scheduler with LazyLogging {
      * 3) There is not a freeze flag associated with their
      *    common backtrack index.
      */ 
-    for(laterI <- 0 to trace.size - 1) {
-      val later @ Unique(laterEvent, laterID) = getEvent(laterI, trace)
-
-      for(earlierI <- 0 to laterI - 1) {
-        val earlier @ Unique(earlierEvent, earlierID) = getEvent(earlierI, trace) 
-        
-        //val sameReceiver = earlierMsg.receiver == laterMsg.receiver
-        if ( isCoEnabeled(earlier, later)) {
+    def analyzeAllPairs() = {
+      for(laterI <- 0 to trace.size - 1) {
+        val later @ Unique(laterEvent, laterID) = getEvent(laterI, trace)
+  
+        for(earlierI <- 0 to laterI - 1) {
+          val earlier @ Unique(earlierEvent, earlierID) = getEvent(earlierI, trace) 
           
-          analyize_dep(earlierI, laterI, trace) match {
-            case Some((branchI, needToReplayV)) =>    
-              
-              //logger.info(Console.GREEN +
-              //  "Found a race between " + earlier.id + " and " +
-              //  later.id + " with a common index " + branchI +
-              //  Console.RESET)
-              
-              // Since we're exploring an already executed trace, we can
-              // safely mark the interleaving of (earlier, later) as
-              // already explored.
-              backTrack.getOrElseUpdate(branchI, new HashMap[(Unique, Unique), List[Unique]])
-              backTrack(branchI)((later, earlier)) = needToReplayV
-              
-              // XXX: Progress hook.
-            case None => // Nothing
+          //val sameReceiver = earlierMsg.receiver == laterMsg.receiver
+          if ( isCoEnabeled(earlier, later)) {
+            
+            analyize_dep(earlierI, laterI, trace) match {
+              case Some((branchI, needToReplayV)) =>    
+                
+                //logger.info(Console.GREEN +
+                //  "Found a race between " + earlier.id + " and " +
+                //  later.id + " with a common index " + branchI +
+                //  Console.RESET)
+                
+                // Since we're exploring an already executed trace, we can
+                // safely mark the interleaving of (earlier, later) as
+                // already explored.
+                backTrack.getOrElseUpdate(branchI, new HashMap[(Unique, Unique), List[Unique]])
+                backTrack(branchI)((later, earlier)) = needToReplayV
+                
+                // XXX: Progress hook.
+              case None => // Nothing
+            }
+            
           }
           
         }
-        
       }
     }
+    
+    
+    
+    if (tracker.progress()) 
+      analyzeAllPairs()
 
     getNext() match {
       case Some((maxIndex, (e1, e2), replayThis)) =>        
